@@ -13,6 +13,16 @@ services:
       timeout: 3s
       retries: 10
 
+  chrome:
+    image: selenium/standalone-chrome:latest
+    container_name: selenium_chrome
+    ports:
+      - "4444:4444" # Cổng để code Python gửi lệnh điều khiển tự động
+      - "7900:7900" # Cổng để BẠN mở trình duyệt lên coi màn hình và đăng nhập
+    shm_size: 2gb    # Rất quan trọng: Cấp đủ bộ nhớ đệm cho Chrome không bị sụp
+    environment:
+      - VNC_PASSWORD=admin  # <--- THÊM DÒNG NÀY ĐỂ ĐẶT MẬT KHẨU
+
   worker:
     build: .
     container_name: rq_worker
@@ -25,6 +35,7 @@ services:
         condition: service_healthy
     environment:
       - PYTHONUNBUFFERED=1
+      - SELENIUM_REMOTE_URL=http://chrome:4444/wd/hub # Khai báo đường dẫn kết nối tới container chrome
 
 volumes:
   redis_data:

@@ -157,7 +157,9 @@
 
             <div class="relative mb-4">
                 <select class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-400 bg-white outline-hidden appearance-none cursor-pointer focus:border-gray-400">
-                    <option>Lọc tài khoản</option>
+                    {% for account in account_list %}
+                        <option value="{{ account.id }}">{{ account.name }}</option>
+                    {% endfor %}
                 </select>
                 <div class="absolute inset-y-0 right-3 flex items-center pointer-events-none text-gray-400 text-xs">
                     <i class="fa-solid fa-chevron-down"></i>
@@ -219,7 +221,66 @@
             </div>
         </div>
 
+        <button 
+            id="btn-run-bot" 
+            class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all cursor-pointer">
+            🚀 Chạy Bot Selenium
+        </button>
+
+        <div id="bot-status" class="mt-2 text-sm text-gray-600"></div>
+
     </div>
+
+    
+
+
+    <script>
+        // Lấy các phần tử HTML qua ID
+        const runBotBtn = document.getElementById('btn-run-bot');
+        const botStatus = document.getElementById('bot-status');
+
+        // Lắng nghe sự kiện click vào nút
+        runBotBtn.addEventListener('click', async () => {
+            // Trạng thái chờ khi đang gửi request
+            runBotBtn.disabled = true;
+            runBotBtn.innerText = "⏳ Đang gửi yêu cầu...";
+            botStatus.innerText = "Đang gửi tín hiệu lên server...";
+            botStatus.style.color = "#4B5563"; // Màu xám
+
+            try {
+                // Gửi request POST tới API /run-bot của FastAPI
+                const response = await fetch('/run-bot', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                // Chuyển kết quả trả về thành JSON
+                const data = await response.json();
+
+                if (response.ok) {
+                    // Nếu thành công (status 200)
+                    botStatus.innerText = `✅ Đã đưa vào hàng đợi thành công! Job ID: ${data.job_id}`;
+                    botStatus.style.color = "#10B981"; // Màu xanh lá
+                } else {
+                    // Nếu server trả về lỗi (4xx, 5xx)
+                    botStatus.innerText = `❌ Thất bại: ${data.message || 'Lỗi server'}`;
+                    botStatus.style.color = "#EF4444"; // Màu đỏ
+                }
+
+            } catch (error) {
+                // Nếu không kết nối được tới server (mất mạng, sập server...)
+                console.error("Lỗi:", error);
+                botStatus.innerText = "❌ Không thể kết nối tới Server.";
+                botStatus.style.color = "#EF4444";
+            } finally {
+                // Mở lại nút bấm sau khi xử lý xong
+                runBotBtn.disabled = false;
+                runBotBtn.innerText = "🚀 Chạy Bot Selenium";
+            }
+        });
+    </script>
 
 </body>
 </html>

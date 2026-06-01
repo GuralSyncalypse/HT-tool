@@ -15,9 +15,17 @@ queue = Queue(connection=redis_conn)
 
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
+    data_from_db = [
+        {"id": "vip", "name": "Tài khoản VIP"},
+        {"id": "normal", "name": "Tài khoản Thường"}
+    ]
     return templates.TemplateResponse(
         request=request,
-        name="index.html"
+        name="index.html",
+        context={
+            "request": request, 
+            "account_list": data_from_db
+        }
     )
 
 @app.post("/run-bot")
