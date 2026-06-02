@@ -90,16 +90,7 @@ def home(request: Request):
         }
     )
 
-# @app.post("/run-bot")
-# def run_bot(data: dict):
-#     job = queue.enqueue(run_selenium_task, data)
-#     return {
-#         "status": "queued",
-#         "job_id": job.id
-#     }
-
-
-@app.post("/url")
+@app.post("/test-post")
 async def receive_url(data: dict):
     print(data)
 
@@ -115,11 +106,6 @@ async def store_cookies(data: CookieData):
     
     return {"status": "success", "message": f"Đã lưu cookie cho tài khoản {data.uid}"}
 
-# @app.post("/api/cookies")
-# def save_cookie(data: CookieData):
-#     print(data)
-#     test_fb_connection(data.cookie_json)
-#     return {"status": "Đã lưu thành công", "uid": data.uid}
 
 def test_fb_connection(cookies_dict):
     """Hàm bổ trợ: Thử dùng cookie vừa nhận để lấy trang chủ FB bằng Python requests"""
