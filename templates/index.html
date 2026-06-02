@@ -221,13 +221,22 @@
             </div>
         </div>
 
-        <button 
-            id="btn-run-bot" 
-            class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all cursor-pointer">
-            🚀 Chạy Bot Selenium
-        </button>
+        <div class="flex flex-col gap-2 max-w-xs m-4">
+            <label class="text-sm font-medium text-gray-700">Chọn tài khoản Clone:</label>
+            <select id="select-uid" class="border border-gray-300 rounded-lg p-2 bg-white">
+                <option value="">-- Đang tải danh sách... --</option>
+            </select>
+            
+            <button 
+                id="btn-run-bot" 
+                class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all cursor-pointer mt-2">
+                🚀 Chạy Bot Selenium
+            </button>
+            
+            <div id="bot-status" class="mt-2 text-sm text-gray-600 font-medium"></div>
+        </div>
 
-        <div id="bot-status" class="mt-2 text-sm text-gray-600"></div>
+        
 
     </div>
 
@@ -235,25 +244,67 @@
 
 
     <script>
-        // Lấy các phần tử HTML qua ID
+        // 1. Lấy các phần tử HTML qua ID
         const runBotBtn = document.getElementById('btn-run-bot');
         const botStatus = document.getElementById('bot-status');
+        const selectUid = document.getElementById('select-uid');
 
-        // Lắng nghe sự kiện click vào nút
+        // 2. TỰ ĐỘNG TẢI DANH SÁCH UID KHI VỪA MỞ TRANG
+        async function loadActiveAccounts() {
+            try {
+                const response = await fetch("/api/active-accounts");
+                const data = await response.json();
+                
+                selectUid.innerHTML = ""; // Xóa dòng chữ đang tải
+                
+                if (!data.uids || data.uids.length === 0) {
+                    selectUid.innerHTML = '<option value="">(Chưa có tài khoản nào được nạp)</option>';
+                    runBotBtn.disabled = true; // Khóa nút chạy nếu không có acc nào
+                    runBotBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                    return;
+                }
+                
+                // Đổ danh sách UID vào thẻ select
+                data.uids.forEach(uid => {
+                    const option = document.createElement("option");
+                    option.value = uid;
+                    option.innerText = `Facebook UID: ${uid}`;
+                    selectUid.appendChild(option);
+                });
+            } catch (error) {
+                console.error("Lỗi tải danh sách tài khoản:", error);
+                selectUid.innerHTML = '<option value="">❌ Lỗi tải dữ liệu tài khoản</option>';
+            }
+        }
+
+        // Kích hoạt hàm tải danh sách ngay khi load xong DOM
+        document.addEventListener("DOMContentLoaded", loadActiveAccounts);
+
+        // 3. LẮNG NGHE SỰ KIỆN CLICK VÀO NÚT CHẠY BOT
         runBotBtn.addEventListener('click', async () => {
+            // Lấy UID hiện tại đang được chọn trong thẻ select
+            const selectedUid = selectUid.value;
+            
+            if (!selectedUid) {
+                botStatus.innerText = "⚠️ Vui lòng chọn một tài khoản hợp lệ!";
+                botStatus.style.color = "#D97706"; // Màu cam chói
+                return;
+            }
+
             // Trạng thái chờ khi đang gửi request
             runBotBtn.disabled = true;
             runBotBtn.innerText = "⏳ Đang gửi yêu cầu...";
-            botStatus.innerText = "Đang gửi tín hiệu lên server...";
+            botStatus.innerText = `Đang gửi tín hiệu chạy bot cho UID: ${selectedUid}...`;
             botStatus.style.color = "#4B5563"; // Màu xám
 
             try {
-                // Gửi request POST tới API /run-bot của FastAPI
+                // Gửi request POST tới API /run-bot kèm theo UID trong body
                 const response = await fetch('/run-bot', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
-                    }
+                    },
+                    body: JSON.stringify({ uid: selectedUid }) // <--- Đã pass uid vào đây
                 });
 
                 // Chuyển kết quả trả về thành JSON
@@ -264,8 +315,8 @@
                     botStatus.innerText = `✅ Đã đưa vào hàng đợi thành công! Job ID: ${data.job_id}`;
                     botStatus.style.color = "#10B981"; // Màu xanh lá
                 } else {
-                    // Nếu server trả về lỗi (4xx, 5xx)
-                    botStatus.innerText = `❌ Thất bại: ${data.message || 'Lỗi server'}`;
+                    // Nếu server trả về lỗi (4xx, 5xx), bốc detail từ FastAPI trả về
+                    botStatus.innerText = `❌ Thất bại: ${data.message}`;
                     botStatus.style.color = "#EF4444"; // Màu đỏ
                 }
 

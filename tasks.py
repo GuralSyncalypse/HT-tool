@@ -10,13 +10,274 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException
 
 class FacebookBot:
+    def __init__(self, email=None, password=None):
+        """Khởi tạo Bot, cấu hình email/password nếu cần dùng bổ sung"""
+        self.email = email
+        self.password = password
+        self.driver = None
+        self.remote_url = os.getenv("SELENIUM_REMOTE_URL", "http://localhost:4444/wd/hub")
+
+        self.setup_driver()
+
+    def setup_driver(self):
+        """Hàm phụ trách cấu hình và khởi tạo Chrome Driver"""
+        chrome_options = Options()
+        chrome_options.add_argument("--headless=new")  # Chạy ẩn trên background server
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--window-size=1920,1080")
+        chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        
+        self.driver = webdriver.Remote(command_executor=self.remote_url ,options=chrome_options)
+
+    def login_with_cookies(self, uid: str, cookies: list) -> bool:
+        """
+        Hàm chính phụ trách mở browser, inject cookies để đăng nhập vào Facebook
+        Trả về True nếu thành công, False nếu thất bại.
+        """
+        print(f"[UID: {uid}] Đang khởi tạo trình duyệt...")
+        self.setup_driver()
+        
+        try:
+            # 1. Đi tới Facebook trước khi add cookie
+            self.driver.get("https://www.facebook.com")
+            time.sleep(2)
+            
+            # 2. Duyệt và Inject cookie vào Browser
+            for cookie in cookies:
+                # Ép kiểu expiry về int nếu có
+                if 'expiry' in cookie:
+                    try:
+                        cookie['expiry'] = int(cookie['expiry'])
+                    except (ValueError, TypeError):
+                        cookie.pop('expiry')
+                
+                # Làm sạch các trường thừa không được Selenium hỗ trợ
+                valid_keys = ['name', 'value', 'domain', 'path', 'expiry', 'secure', 'httpOnly', 'sameSite']
+                clean_cookie = {k: v for k, v in cookie.items() if k in valid_keys}
+                
+                try:
+                    self.driver.add_cookie(clean_cookie)
+                except Exception as e:
+                    print(f"[UID: {uid}] Lỗi add cookie {clean_cookie.get('name')}: {e}")
+            
+            # 3. Refresh để áp dụng Cookie và vào trạng thái Đăng Nhập
+            self.driver.refresh()
+            time.sleep(3)
+            
+            print(f"[UID: {uid}] Inject cookie hoàn tất. Tiêu đề trang: {self.driver.title}")
+            return True
+
+        except Exception as e:
+            print(f"[UID: {uid}] Gặp lỗi trong quá trình inject cookie: {e}")
+            self.close() # Đóng driver ngay nếu lỗi giữa chừng
+            return False
+
+    def send_message_via_uid(self, uid, content):
+        def close_chat():
+            try:
+                print("[+] Đang đóng chat...")
+
+                close_button = self.driver.find_element(
+                    By.XPATH,
+                    '//div[@aria-label="Close chat"]'
+                )
+
+                close_button.click()
+
+                print("[+] Đã đóng chat")
+
+            except Exception as e:
+                print(
+                    f"[!] Close chat failed UID={uid}: {e}"
+                )
+
+        def find_message_button():
+            try:
+                message_button = WebDriverWait(self.driver, 2).until(
+                    EC.element_to_be_clickable((
+                        By.XPATH,
+                        '//div[@aria-label="Message" or @aria-label="Nhắn tin"]'
+                    ))
+                )
+
+                print("[+] Đã tìm thấy nút Message")
+
+            except TimeoutException as e:
+                raise Exception(
+                    f"[MESSAGE_BUTTON_TIMEOUT] UID={uid}"
+                ) from e
+            
+            except NoSuchElementException as e:
+                raise Exception(
+                    f"[MESSAGE_BUTTON_NOT_FOUND] UID={uid}"
+                ) from e
+            
+            return message_button
+            
+        def find_chatbox():
+            try:
+                chatbox_xpath = (
+                    '//div[contains(@aria-label, "Write to")]'
+                )
+
+                chatbox = WebDriverWait(self.driver, 3).until(
+                    EC.presence_of_element_located(
+                        (By.XPATH, chatbox_xpath)
+                    )
+                )
+
+                print("[+] Đã tìm thấy chatbox")
+
+            except TimeoutException as e:
+                close_chat()
+                raise Exception(
+                    f"[CHATBOX_TIMEOUT] UID={uid}"
+                ) from e
+            
+            return chatbox
+
+        def clear_chatbox():
+            try:
+                print("[+] Đang clear chatbox...")
+
+                chatbox.send_keys(Keys.CONTROL, "a")
+                chatbox.send_keys(Keys.DELETE)
+
+                print("[+] Đã clear chatbox")
+
+            except Exception as e:
+                print(
+                    f"[!] Clear chatbox failed UID={uid}: {e}"
+                )
+
+        try:
+            # =========================
+            # OPEN PROFILE
+            # =========================
+            try:
+                print(f"\n[+] Đang mở trang cá nhân UID: {uid}")
+
+                user_url = f"https://www.facebook.com/{uid}"
+                self.driver.get(user_url)
+
+            except Exception as e:
+                raise Exception(
+                    f"[OPEN_PROFILE_FAILED] UID={uid}"
+                ) from e
+
+            # =========================
+            # FIND MESSAGE BUTTON
+            # =========================
+            message_button = find_message_button()
+
+            
+            # =========================
+            # CLICK MESSAGE BUTTON
+            # =========================
+            try:
+                self.driver.execute_script(
+                    "arguments[0].scrollIntoView({block: 'center'});",
+                    message_button
+                )
+
+                message_button.click()
+
+                print("[+] Đã click Message")
+
+            except ElementClickInterceptedException as e:
+                raise Exception(
+                    f"[MESSAGE_BUTTON_CLICK_BLOCKED] UID={uid}"
+                ) from e
+
+            except Exception as e:
+                raise Exception(
+                    f"[MESSAGE_BUTTON_CLICK_FAILED] UID={uid}"
+                ) from e
+
+            # =========================
+            # FIND CHATBOX
+            # =========================
+            chatbox = find_chatbox()
+
+            # =========================
+            # INPUT MESSAGE
+            # =========================
+            try:
+                print(f"[+] Đang nhập tin nhắn: '{content}'")
+
+                time.sleep(random.uniform(0.2, 0.5))
+                chatbox.send_keys(content)
+
+                print("[+] Đã nhập tin nhắn")
+
+            except Exception as e:
+                raise Exception(
+                    f"[INPUT_MESSAGE_FAILED] UID={uid}"
+                ) from e
+
+
+            # =========================
+            # SEND MESSAGE
+            # =========================
+            try:
+                print("[+] Đang gửi tin nhắn...")
+
+                # send_button.click()
+                #chatbox.click(Keys.ENTER)
+                time.sleep(random.uniform(0.5, 1.5))
+
+                print("[🔑] Gửi thành công!")
+
+            except Exception as e:
+                raise Exception(
+                    f"[SEND_MESSAGE_FAILED] UID={uid}"
+                ) from e
+
+
+            clear_chatbox()
+
+            close_chat()
+
+            return True
+
+        except Exception as e:
+            print(f"[❌] {e}")
+            return False
+
+
+    def run_actions(self, uid: str):
+        """Hàm chứa các kịch bản hành động của bot sau khi đã login thành công"""
+        if not self.driver:
+            print(f"[UID: {uid}] Trình duyệt chưa được khởi tạo!")
+            return
+            
+        try:
+            print(f"[UID: {uid}] Đang thực hiện các tác vụ của bot...")
+            # Ví dụ các hành động của bạn:
+            
+            for uid in uids:
+                self.send_message_via_uid(uid, "Hello!")
+
+            time.sleep(5) # Giả lập thời gian bot làm việc
+            
+        except Exception as e:
+            print(f"[UID: {uid}] Lỗi khi chạy tác vụ: {e}")
+
+    def close(self):
+        """Đóng trình duyệt giải phóng RAM"""
+        if self.driver:
+            self.driver.quit()
+            self.driver = None
+            print("Đã đóng trình duyệt an toàn.")
+
+class XFacebookBot:
     def __init__(self, email, password):
         self.email = email
         self.password = password
         self.driver = None
         # Save to /app/downloads to leverage the Docker Compose Volume
-        self.cookie_file = "/app/downloads/fb_cookies.pkl" 
-        self.remote_url = os.getenv("SELENIUM_REMOTE_URL", "http://localhost:4444/wd/hub")
+        #self.cookie_file = "/app/downloads/fb_cookies.pkl" 
 
     def init_driver(self, headless=True):
         """Initializes a new driver session dynamically."""
@@ -30,14 +291,6 @@ class FacebookBot:
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--disable-notifications")
         options.page_load_strategy = "eager"
-
-        # Image blocking to optimize speed (Disable it if it disrupts your login process)
-
-        # Note: Headless mode is omitted here because the 'selenium/standalone-chrome' 
-        # container manages its own virtual desktop (Xvfb) automatically.
-
-        print(f"🌐 Creating a new Browser session (Connection: {self.remote_url})...")
-        self.driver = webdriver.Remote(command_executor=self.remote_url, options=options)
 
     def close_driver(self):
         """Safely shuts down the browser instance to free up RAM."""
@@ -402,7 +655,31 @@ uids = [
     '100091656182252',
     '100068953794888'
 ]
-def run_selenium_task() -> str:
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+import time
+
+# Hàm này được gọi bởi queue.enqueue(run_selenium_task, data)
+def run_selenium_task(data: dict):
+    uid = data.get("uid")
+    cookies = data.get("cookie_json", [])
+    
+    # 1. Khởi tạo đối tượng Bot từ Class
+    bot = FacebookBot()
+    
+    # 2. Gọi hàm login bằng cookie
+    login_success = bot.login_with_cookies(uid, cookies)
+    
+    if login_success:
+        # 3. Chạy kịch bản nuôi tài khoản/spam/tương tác nếu login thành công
+        bot.run_actions(uid)
+        
+    # 4. LUÔN LUÔN đóng bot ở cuối cùng để tránh tràn RAM server
+    bot.close()
+    
+    return {"status": "completed", "uid": uid}
+
+
     """Main coordinator function for the Selenium task."""
     download_dir = "/app/downloads"
     url = "https://example.com"
