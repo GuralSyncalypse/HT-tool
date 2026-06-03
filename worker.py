@@ -1,6 +1,5 @@
 from redis import Redis
 from rq import Worker, Queue
-import tasks
 
 redis_conn = Redis(host="redis", port=6379)
 

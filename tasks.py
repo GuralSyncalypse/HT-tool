@@ -1,10 +1,12 @@
 import os
 import time
 import random
+import re
+import redis
+import json
+from openpyxl import Workbook
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
-
-service = Service("/usr/bin/chromedriver")
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
@@ -12,9 +14,15 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException
 
+# 1. Kết nối thẳng tới Redis từ file Selenium luôn
+redis_conn = redis.Redis(host='redis', port=6379, decode_responses=True)
+service = Service("/usr/bin/chromedriver")
+
 class FacebookBot:
     def __init__(self):
         self.driver = None
+        self.user_agent = None
+
         self.remote_url = os.getenv("SELENIUM_REMOTE_URL", "http://localhost:4444/wd/hub")
 
     def setup_driver(self):
@@ -24,7 +32,7 @@ class FacebookBot:
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--window-size=1920,1080")
-        #chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        chrome_options.add_argument(f"--user-agent={self.user_agent}")
         
         self.driver = webdriver.Remote(
             command_executor=self.remote_url,
@@ -33,9 +41,10 @@ class FacebookBot:
 
     def is_logged_in(self):
         driver = self.driver
-
+        print(driver.get_cookies())
         cookies = {c["name"] for c in driver.get_cookies()}
 
+        print(cookies)
         # Fast fail
         if "c_user" not in cookies or "xs" not in cookies:
             return False
@@ -85,9 +94,13 @@ class FacebookBot:
             # 3. Refresh để áp dụng Cookie và vào trạng thái Đăng Nhập
             self.driver.refresh()
             time.sleep(3)
-            
+
             print(f"[UID: {uid}] Inject cookie hoàn tất. Tiêu đề trang: {self.driver.title}")
-            return True
+            
+            success = self.is_logged_in()
+            if success:
+                print("Hoàn tất đăng nhập!")
+            return success
 
         except Exception as e:
             print(f"[UID: {uid}] Gặp lỗi trong quá trình inject cookie: {e}")
@@ -266,6 +279,87 @@ class FacebookBot:
             print(f"[❌] {e}")
             return False
 
+    def scrape_joined_groups(self):
+        """
+        Hàm cào danh sách Group đã tham gia từ trang /groups/joins
+        Chỉ tập trung tìm kiếm trong vùng nội dung chính (role="main")
+        """
+        print("🔄 Đang truy cập trang danh sách Nhóm đã tham gia...")
+        self.driver.get("https://www.facebook.com/groups/joins")
+        time.sleep(4) # Đợi trang tải các group đầu tiên
+
+        # Vòng lặp cuộn trang để tải hết danh sách Group
+        last_height = self.driver.execute_script("return document.body.scrollHeight")
+        scroll_attempts = 10 
+        
+        for i in range(scroll_attempts):
+            print(f"📜 Đang cuộn trang lần {i+1}/{scroll_attempts}...")
+            self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            time.sleep(3) 
+            
+            new_height = self.driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                print("🛑 Đã cuộn đến cuối danh sách hoặc không có dữ liệu mới.")
+                break
+            last_height = new_height
+
+        print("🔍 Bắt đầu trích xuất dữ liệu Group từ vùng nội dung chính...")
+        joined_groups = []
+
+        try:
+            # 1. Định vị vùng nội dung chính của trang Facebook
+            main_container = self.driver.find_element(By.XPATH, "//*[@role='main']")
+            
+            # 2. Chỉ tìm các khối group item NẰM TRONG vùng role="main" này
+            group_items = main_container.find_elements(By.XPATH, ".//div[@role='listitem']")
+            print(f"📊 Phát hiện {len(group_items)} khối group item trong khu vực nội dung chính.")
+
+            for item in group_items:
+                try:
+                    # 3. Tìm thẻ <a> chứa link nhóm bên trong item
+                    a_tag = item.find_element(By.XPATH, ".//a[contains(@href, '/groups/')]")
+                    url = a_tag.get_attribute("href")
+                    
+                    # 4. Lấy tên Group (Xử lý fallback nếu thẻ a đầu tiên là ảnh/trống chữ)
+                    title = a_tag.text.strip()
+                    if not title:
+                        all_links = item.find_elements(By.XPATH, ".//a[contains(@href, '/groups/')]")
+                        for link in all_links:
+                            if link.text.strip():
+                                title = link.text.strip()
+                                break
+
+                    if title and url:
+                        # Trích xuất ID/Alias từ URL
+                        match = re.search(r'/groups/([^/]+)', url)
+                        group_id = match.group(1) if match else None
+                        
+                        # Loại bỏ các sub-page mặc định
+                        if not group_id or group_id in ["joins", "feed", "discover", "create"]:
+                            continue
+
+                        group_info = {
+                            "group_name": title,
+                            "group_id": group_id,
+                            "group_url": f"https://www.facebook.com/groups/{group_id}/"
+                        }
+                        
+                        # Kiểm tra trùng lặp theo ID
+                        if not any(g['group_id'] == group_id for g in joined_groups):
+                            print(f"✅ Đã tìm thấy: {title} (ID: {group_id})")
+                            joined_groups.append(group_info)
+                            
+                except Exception:
+                    continue
+
+        except Exception as e:
+            print(f"❌ Không tìm thấy vùng nội dung chính (role='main'). Lỗi: {e}")
+            return []
+
+        print(f"🎉 Đã lọc và trích xuất thành công {len(joined_groups)} nhóm đã tham gia.")
+        return joined_groups
+
+
     def run_actions(self, uid: str):
         """Hàm chứa các kịch bản hành động của bot sau khi đã login thành công"""
         if not self.driver:
@@ -276,10 +370,20 @@ class FacebookBot:
             print(f"[UID: {uid}] Đang thực hiện các tác vụ của bot...")
             # Ví dụ các hành động của bạn:
             
-            for uid in uids:
-                self.send_message_via_uid(uid, "Hello!")
+            # data = []
+            # for uid in uids:
+            #     success = self.send_message_via_uid(uid, "Hello!")
+            #     data.append([uid, success])
+            groups = self.scrape_joined_groups()
+            print(groups)
+            try:
+                redis_conn.set(f"groups:{uid}", json.dumps(groups))
+                print(f"🚀 [Worker] Đã lưu thẳng {len(groups)} group vào Redis cho UID {uid}!")
+            except Exception as redis_err:
+                print(f"❌ Lỗi ghi Redis từ Worker: {redis_err}")
 
             time.sleep(5) # Giả lập thời gian bot làm việc
+            # create_excel_file(data, ['uid', 'success'], 'app/output', 'result.xlsx')
             
         except Exception as e:
             print(f"[UID: {uid}] Lỗi khi chạy tác vụ: {e}")
@@ -313,6 +417,26 @@ def capture_screenshot(driver: webdriver.Chrome, url: str, download_dir: str) ->
     
     return screenshot_path
 
+def create_excel_file(data, headers, dir, filename):
+    if not os.path.exists(dir):
+        os.makedirs(dir)
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Results"
+
+    # Headers
+    ws.append(headers)
+
+    # Data rows
+    for row in data:
+        ws.append(row)
+
+    full_path = dir + '/' + filename
+
+    wb.save(full_path)
+
+    print(f"Excel file '{full_path}' created successfully.")
 
 
 uids = [
@@ -331,50 +455,18 @@ uids = [
 def run_selenium_task(data: dict):
     uid = data.get("uid")
     cookies = data.get("cookie_json", [])
-    
-    # 1. Khởi tạo đối tượng Bot từ Class
+    user_agent = data.get("user_agent", "") # <--- Nhận thêm trường này ở đây
+
     bot = FacebookBot()
-    
-    # 2. Gọi hàm login bằng cookie
+    bot.user_agent = user_agent
+    print(user_agent)
     login_success = bot.login_with_cookies(uid, cookies)
     
     if login_success:
-        # 3. Chạy kịch bản nuôi tài khoản/spam/tương tác nếu login thành công
+        print('Tiến hành chạy tiến trình')
         bot.run_actions(uid)
         
-    # 4. LUÔN LUÔN đóng bot ở cuối cùng để tránh tràn RAM server
+
     bot.close()
     
     return {"status": "completed", "uid": uid}
-
-
-    """Main coordinator function for the Selenium task."""
-    download_dir = "/app/downloads"
-    url = "https://example.com"
-    
-    # 1. Initialize the bot with credentials (DO NOT create webdriver here)
-    bot = FacebookBot(email="gurasyn@gmail.com", password="saile123456!")
-    
-    try:
-        # 2. Trigger the smart login flow 
-        # (This internally handles init_driver, cookie checks, and manual VNC fallback)
-        bot.ensure_login()
-        
-        # 3. Quick validation: Check if the bot successfully acquired a driver session
-        if bot.driver is None:
-            print("❌ Halted: Bot could not establish a valid authenticated browser session.")
-            return None
-            
-        # 4. Execute your custom logic (e.g., capture screenshot) using the active session
-        print(f"📸 Navigating to task URL: {url}")
-        path = capture_screenshot(bot.driver, url, download_dir)
-        return path
-        
-    except Exception as e:
-        print(f"❌ Error occurred during selenium task execution: {e}")
-        return None
-        
-    finally:
-        # 5. Always ensure the browser is closed to avoid RAM leaks
-        # We use the built-in method inside your class
-        bot.close_driver()

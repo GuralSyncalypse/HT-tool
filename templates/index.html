@@ -202,20 +202,22 @@
                     </div>
                 </div>
 
-                <div class="flex-1 flex flex-col items-center justify-center py-12">
-                    <div class="w-32 h-32 bg-gray-50 rounded-full flex items-center justify-center relative mb-4">
-                        <div class="w-20 h-16 border-2 border-gray-200 bg-white rounded-lg shadow-2xs p-2 flex flex-col space-y-1">
-                            <div class="flex space-x-1 mb-1">
-                                <div class="w-1.5 h-1.5 bg-gray-300 rounded-full"></div>
-                                <div class="w-1.5 h-1.5 bg-gray-300 rounded-full"></div>
-                                <div class="w-1.5 h-1.5 bg-gray-300 rounded-full"></div>
+                <div id="group-container" class="divide-y divide-gray-50">
+                    <div class="flex-1 flex flex-col items-center justify-center py-12">
+                        <div class="w-32 h-32 bg-gray-50 rounded-full flex items-center justify-center relative mb-4">
+                            <div class="w-20 h-16 border-2 border-gray-200 bg-white rounded-lg shadow-2xs p-2 flex flex-col space-y-1">
+                                <div class="flex space-x-1 mb-1">
+                                    <div class="w-1.5 h-1.5 bg-gray-300 rounded-full"></div>
+                                    <div class="w-1.5 h-1.5 bg-gray-300 rounded-full"></div>
+                                    <div class="w-1.5 h-1.5 bg-gray-300 rounded-full"></div>
+                                </div>
+                                <div class="w-full h-2 bg-gray-100 rounded-xs"></div>
+                                <div class="w-3/4 h-2 bg-gray-100 rounded-xs"></div>
                             </div>
-                            <div class="w-full h-2 bg-gray-100 rounded-xs"></div>
-                            <div class="w-3/4 h-2 bg-gray-100 rounded-xs"></div>
+                            <div class="absolute bottom-4 right-4 w-10 h-10 bg-gray-300/40 rounded-sm"></div>
                         </div>
-                        <div class="absolute bottom-4 right-4 w-10 h-10 bg-gray-300/40 rounded-sm"></div>
+                        <span class="text-sm font-bold text-gray-800">Không tìm thấy nhóm</span>
                     </div>
-                    <span class="text-sm font-bold text-gray-800">Không tìm thấy nhóm</span>
                 </div>
 
             </div>
@@ -248,37 +250,119 @@
         const runBotBtn = document.getElementById('btn-run-bot');
         const botStatus = document.getElementById('bot-status');
         const selectUid = document.getElementById('select-uid');
+        const container = document.getElementById("group-container");
 
-        // 2. TỰ ĐỘNG TẢI DANH SÁCH UID KHI VỪA MỞ TRANG
-        async function loadActiveAccounts() {
+        async function loadGroups(uid) {
+            if (!uid) {
+                renderEmptyState();
+                return;
+            }
+            
             try {
-                const response = await fetch("/api/active-accounts");
-                const data = await response.json();
+                console.log(`🔄 Đang tải danh sách group cho UID: ${uid}`);
+                const response = await fetch(`http://127.0.0.1:8000/api/get-groups/${uid}`);
+                const groups = await response.json();
                 
-                selectUid.innerHTML = ""; // Xóa dòng chữ đang tải
-                
-                if (!data.uids || data.uids.length === 0) {
-                    selectUid.innerHTML = '<option value="">(Chưa có tài khoản nào được nạp)</option>';
-                    runBotBtn.disabled = true; // Khóa nút chạy nếu không có acc nào
-                    runBotBtn.classList.add('opacity-50', 'cursor-not-allowed');
-                    return;
+                if (groups && groups.length > 0) {
+                    container.innerHTML = ""; 
+                    groups.forEach(group => {
+                        const row = document.createElement("div");
+                        row.className = "grid grid-cols-12 text-xs text-gray-600 px-2 py-3 items-center hover:bg-gray-50 transition";
+                        row.innerHTML = `
+                            <div class="col-span-6 font-medium text-gray-900">
+                                <a href="${group.group_url}" target="_blank" class="hover:text-blue-600 hover:underline flex flex-col">
+                                    <span class="font-semibold text-gray-800">${group.group_name}</span>
+                                    <span class="text-[10px] text-gray-400">ID: ${group.group_id}</span>
+                                </a>
+                            </div>
+                            <div class="col-span-2 text-center text-gray-400">-</div>
+                            <div class="col-span-2 text-center text-gray-400">-</div>
+                            <div class="col-span-1 text-center text-gray-400">-</div>
+                            <div class="col-span-1 text-center flex justify-center">
+                                <span class="bg-green-50 text-green-700 px-1.5 py-0.5 rounded text-[10px] font-medium">Đã tham gia</span>
+                            </div>
+                        `;
+                        container.appendChild(row);
+                    });
+                } else {
+                    renderEmptyState();
                 }
-                
-                // Đổ danh sách UID vào thẻ select
-                data.uids.forEach(uid => {
-                    const option = document.createElement("option");
-                    option.value = uid;
-                    option.innerText = `Facebook UID: ${uid}`;
-                    selectUid.appendChild(option);
-                });
             } catch (error) {
-                console.error("Lỗi tải danh sách tài khoản:", error);
-                selectUid.innerHTML = '<option value="">❌ Lỗi tải dữ liệu tài khoản</option>';
+                console.error("Lỗi khi kết nối API lấy nhóm:", error);
+                renderEmptyState();
             }
         }
 
-        // Kích hoạt hàm tải danh sách ngay khi load xong DOM
-        document.addEventListener("DOMContentLoaded", loadActiveAccounts);
+    // 2. Hàm phụ vẽ trạng thái trống (Hộp xám)
+    function renderEmptyState() {
+        container.innerHTML = `
+            <div class="flex-1 flex flex-col items-center justify-center py-12">
+                <div class="w-32 h-32 bg-gray-50 rounded-full flex items-center justify-center relative mb-4">
+                    <div class="w-20 h-16 border-2 border-gray-200 bg-white rounded-lg shadow-2xs p-2 flex flex-col space-y-1">
+                        <div class="flex space-x-1 mb-1">
+                            <div class="w-1.5 h-1.5 bg-gray-300 rounded-full"></div>
+                            <div class="w-1.5 h-1.5 bg-gray-300 rounded-full"></div>
+                            <div class="w-1.5 h-1.5 bg-gray-300 rounded-full"></div>
+                        </div>
+                        <div class="w-full h-2 bg-gray-100 rounded-xs"></div>
+                        <div class="w-3/4 h-2 bg-gray-100 rounded-xs"></div>
+                    </div>
+                    <div class="absolute bottom-4 right-4 w-10 h-10 bg-gray-300/40 rounded-sm"></div>
+                </div>
+                <span class="text-sm font-bold text-gray-800">Không tìm thấy nhóm</span>
+            </div>
+        `;
+    }
+
+    // 3. HÀM TỰ ĐỘNG TẢI DANH SÁCH UID VÀ ĐIỀU KHIỂN LUỒNG CHẠY
+    async function loadActiveAccounts() {
+        try {
+            const response = await fetch("/api/active-accounts");
+            const data = await response.json();
+            
+            selectUid.innerHTML = ""; // Xóa dòng chữ "Đang tải danh sách..."
+            
+            if (!data.uids || data.uids.length === 0) {
+                selectUid.innerHTML = '<option value="">(Chưa có tài khoản nào được nạp)</option>';
+                if(runBotBtn) {
+                    runBotBtn.disabled = true;
+                    runBotBtn.classList.add('opacity-50', 'cursor-not-allowed');
+                }
+                renderEmptyState(); // Không có acc -> Hiện hộp xám liền
+                return;
+            }
+            
+            // Đổ danh sách UID vào thẻ select
+            data.uids.forEach(uid => {
+                const option = document.createElement("option");
+                option.value = uid;
+                option.innerText = `Facebook UID: ${uid}`;
+                selectUid.appendChild(option);
+            });
+
+            // 🔥 ĐÂY LÀ ĐIỂM MẤU CHỐT: Sau khi nạp xong danh sách, 
+            // lấy ngay UID của tài khoản đầu tiên để tự động load nhóm lên màn hình luôn!
+            const firstUid = selectUid.value; 
+            loadGroups(firstUid);
+
+        } catch (error) {
+            console.error("Lỗi tải danh sách tài khoản:", error);
+            selectUid.innerHTML = '<option value="">❌ Lỗi tải dữ liệu tài khoản</option>';
+            renderEmptyState();
+        }
+    }
+
+    // 4. KHỞI CHẠY VÀ LẮNG NGHE SỰ KIỆN
+    document.addEventListener("DOMContentLoaded", () => {
+        // Chạy nạp danh sách tài khoản trước
+        loadActiveAccounts();
+
+        // Lắng nghe sự kiện đổi tài khoản trên UI
+        selectUid.addEventListener("change", (event) => {
+            const selectedUid = event.target.value;
+            loadGroups(selectedUid);
+        });
+    });
 
         // 3. LẮNG NGHE SỰ KIỆN CLICK VÀO NÚT CHẠY BOT
         runBotBtn.addEventListener('click', async () => {
@@ -331,6 +415,7 @@
                 runBotBtn.innerText = "🚀 Chạy Bot Selenium";
             }
         });
+
     </script>
 
 </body>
