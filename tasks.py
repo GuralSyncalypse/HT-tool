@@ -65,8 +65,6 @@ class FacebookBot:
         """
         print(f"[UID: {uid}] Đang khởi tạo trình duyệt...")
         self.setup_driver()
-
-        print("ABC")
         
         try:
             # 1. Đi tới Facebook trước khi add cookie
@@ -359,8 +357,53 @@ class FacebookBot:
         print(f"🎉 Đã lọc và trích xuất thành công {len(joined_groups)} nhóm đã tham gia.")
         return joined_groups
 
+    def create_post(self, content="", img_paths=[]):
+        self.driver.get("https://www.facebook.com/me")
+        post_box_xpath = "//span[contains(text(),'mind') or contains(text(),'nghĩ gì') or contains(text(),'something') or contains(text(),'viết gì')]"
 
-    def run_actions(self, uid: str):
+        post_box = self.driver.find_element(By.XPATH, post_box_xpath)
+        post_box.click()
+
+        print("Đã mở hộp đăng bài")
+
+        time.sleep(2)
+
+        composer = WebDriverWait(self.driver, 10).until(
+            EC.presence_of_element_located(
+                (By.XPATH, "//div[@role='dialog' and @aria-modal='true']")
+            )
+        )
+
+        print("Đã vào hộp đăng bài")
+
+        # Cô lập Form
+        editor = composer.find_element(
+            By.XPATH,
+            ".//div[@role='textbox']"
+        )
+
+        editor.click()
+        editor.send_keys(content)
+
+        print("Đã nhập nội dung")
+
+        # Thêm ảnh
+        if not img_paths:
+            print("Không tìm thấy ảnh!")
+            return
+
+        valid_file = 'image/*,image/heif,image/heic,video/*,video/mp4,video/x-m4v,video/x-matroska,.mkv,.avi,.wmv,.mov,.flv,.webm,.3gp,.3g2,.mts,.m2ts,.vob,.divx,.f4v,.ogv'
+        file_input = composer.find_element(
+            By.XPATH,
+            f".//input[@accept='{valid_file}']"
+        )
+
+        for img_path in img_paths:
+            print(f"Thêm ảnh {img_path}")
+            file_input.send_keys(img_path)
+
+
+    def run_actions(self, uid: str, content="", img_paths=[]):
         """Hàm chứa các kịch bản hành động của bot sau khi đã login thành công"""
         if not self.driver:
             print(f"[UID: {uid}] Trình duyệt chưa được khởi tạo!")
@@ -374,13 +417,16 @@ class FacebookBot:
             # for uid in uids:
             #     success = self.send_message_via_uid(uid, "Hello!")
             #     data.append([uid, success])
-            groups = self.scrape_joined_groups()
-            print(groups)
-            try:
-                redis_conn.set(f"groups:{uid}", json.dumps(groups))
-                print(f"🚀 [Worker] Đã lưu thẳng {len(groups)} group vào Redis cho UID {uid}!")
-            except Exception as redis_err:
-                print(f"❌ Lỗi ghi Redis từ Worker: {redis_err}")
+            
+            # groups = self.scrape_joined_groups()
+            # print(groups)
+            # try:
+            #     redis_conn.set(f"groups:{uid}", json.dumps(groups))
+            #     print(f"🚀 [Worker] Đã lưu thẳng {len(groups)} group vào Redis cho UID {uid}!")
+            # except Exception as redis_err:
+            #     print(f"❌ Lỗi ghi Redis từ Worker: {redis_err}")
+
+            self.create_post(content, img_paths)
 
             time.sleep(5) # Giả lập thời gian bot làm việc
             # create_excel_file(data, ['uid', 'success'], 'app/output', 'result.xlsx')
@@ -456,15 +502,19 @@ def run_selenium_task(data: dict):
     uid = data.get("uid")
     cookies = data.get("cookie_json", [])
     user_agent = data.get("user_agent", "") # <--- Nhận thêm trường này ở đây
+    content = data.get("text_content", "")
+    imgs_path = data.get("image_paths", [])
+
+    print(imgs_path)
 
     bot = FacebookBot()
     bot.user_agent = user_agent
-    print(user_agent)
+
     login_success = bot.login_with_cookies(uid, cookies)
     
     if login_success:
         print('Tiến hành chạy tiến trình')
-        bot.run_actions(uid)
+        bot.run_actions(uid, content, imgs_path)
         
 
     bot.close()
