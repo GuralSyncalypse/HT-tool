@@ -58,6 +58,74 @@ const selectUid = document.getElementById("select-uid");
 //     });
 // }
 
+export function initUpdateGroupButton() {
+    const btnUpdateGroup = document.getElementById("btn-update-group"); // ID nút gửi bài của bạn
+
+    if (!btnUpdateGroup) return;
+
+    btnUpdateGroup.addEventListener("click", async () => {
+        // 1. Lấy dữ liệu từ giao diện
+        const uid = document.getElementById("select-uid")?.value;
+        const action = "update-group"; // Hoặc lấy từ input/dropdown của bạn
+        const content = document.getElementById("content-box")?.value || "";
+        
+        // 2. Lấy danh sách file ảnh từ module uploader
+        const selectedFiles = getSelectedFiles(); 
+
+        if (!uid || !action) {
+            alert("Vui lòng điền đầy đủ thông tin UID và Action!");
+            return;
+        }
+
+        // 3. Khởi tạo FormData
+        const formData = new FormData();
+        formData.append("uid", uid);
+        formData.append("action", action);
+        formData.append("content", content);
+
+        // 4. QUAN TRỌNG: Loop qua mảng file và append chung vào 1 key 'images'
+        selectedFiles.forEach((file) => {
+            formData.append("images", file); 
+        });
+
+        try {
+            btnPost.disabled = true;
+            btnPost.innerText = "Đang gửi...";
+
+            // 5. Gửi request lên FastAPI
+            const response = await fetch("/run-bot", {
+                method: "POST",
+                body: formData 
+                // LƯU Ý: KHÔNG set Header 'Content-Type'. 
+                // Trình duyệt sẽ tự định nghĩa Content-Type là multipart/form-data kèm boundary chuẩn xác.
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                alert("Gửi bài thành công!");
+                
+                // 6. Reset uploader sau khi gửi thành công để giải phóng bộ nhớ
+                const btnSelectImage = document.getElementById('btnSelectImage');
+                const imagePreviewContainer = document.getElementById('imagePreviewContainer');
+                resetUploader(btnSelectImage, imagePreviewContainer);
+                if (document.getElementById("contentInput")) {
+                    document.getElementById("contentInput").value = "";
+                }
+            } else {
+                const errorData = await response.json();
+                console.error("Lỗi từ server:", errorData);
+                alert("Có lỗi xảy ra khi gửi bài!");
+            }
+        } catch (error) {
+            console.error("Lỗi kết nối:", error);
+            alert("Không thể kết nối tới server!");
+        } finally {
+            btnPost.disabled = false;
+            btnPost.innerText = "Đăng bài";
+        }
+    });
+}
+
 // bot.js
 import { getSelectedFiles, resetUploader } from "./imageUploader.js";
 

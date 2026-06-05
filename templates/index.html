@@ -166,10 +166,8 @@
             </div>
 
             <div class="relative mb-4">
-                <select class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-400 bg-white outline-hidden appearance-none cursor-pointer focus:border-gray-400">
-                    {% for account in account_list %}
-                        <option value="{{ account.id }}">{{ account.name }}</option>
-                    {% endfor %}
+                <select id="select-uid" class="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm text-gray-400 bg-white outline-hidden appearance-none cursor-pointer focus:border-gray-400">
+                    <option value="">-- Đang tải danh sách... --</option>
                 </select>
                 <div class="absolute inset-y-0 right-3 flex items-center pointer-events-none text-gray-400 text-xs">
                     <i class="fa-solid fa-chevron-down"></i>
@@ -192,7 +190,8 @@
                     
                     <div class="flex space-x-2">
                         <button class="px-4 py-1.5 border border-gray-300 text-gray-700 font-medium text-xs rounded-md hover:bg-gray-50 cursor-pointer">Lưu</button>
-                        <button class="px-3 py-1.5 border border-gray-300 text-gray-700 font-medium text-xs rounded-md hover:bg-gray-50 cursor-pointer">Xuất File Nhóm</button>
+                        <button class="px-3 py-1.5 border border-gray-300 text-gray-700 font-medium text-xs rounded-md hover:bg-gray-50 cursor-pointer">Xuất nhóm</button>
+                        <button id="btn-update-group" class="px-3 py-1.5 border border-gray-300 text-gray-700 font-medium text-xs rounded-md hover:bg-gray-50 cursor-pointer">Cập nhật</button>
                     </div>
                 </div>
 
@@ -238,11 +237,6 @@
         </div>
 
         <div class="flex flex-col gap-2 max-w-xs m-4">
-            <label class="text-sm font-medium text-gray-700">Chọn tài khoản Clone:</label>
-            <select id="select-uid" class="border border-gray-300 rounded-lg p-2 bg-white">
-                <option value="">-- Đang tải danh sách... --</option>
-            </select>
-            
             <button 
                 id="btn-run-bot" 
                 class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg shadow-sm transition-all cursor-pointer mt-2">

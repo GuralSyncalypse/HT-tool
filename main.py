@@ -80,7 +80,6 @@ def get_groups(uid: str, page: int = 1, page_size: int = 10):
     data = redis_conn.get(f"groups:{uid}")
     if data:
         return json.loads(data)
-    print("NONE")
     return []
 
 @app.post("/upload")
@@ -96,10 +95,11 @@ async def run_bot(
     uid: str = Form(...),
     action: str = Form(...),
     content: str = Form(""),
-    images: List[UploadFile] = File(...)
+    images: List[UploadFile] = File(default=[])
 ):
     # 1. Lấy Token/Cookie của UID này từ Redis ra
     print(content)
+    print(images)
     session_str = redis_conn.get(f"cookies:{uid}")
     if not session_str:
         raise HTTPException(status_code=400, detail="Tài khoản chưa đăng nhập hoặc cookie hết hạn")
@@ -137,19 +137,39 @@ async def run_bot(
     
     return {"status": "queued", "job_id": job.id, "images_received": len(saved_paths)}
 
+@app.post("/scan-groups")
+async def run_group_scan(uid: str = Form(...)): # Nên chuyển sang Form cho đồng bộ với bot
+    # 1. Kiểm tra spam: Nếu UID này đang có task quét chạy rồi thì chặn lại
+    is_scanning = redis_conn.get(f"scanning_lock:{uid}")
+    if is_scanning:
+        raise HTTPException(status_code=429, detail="Hệ thống đang quét nhóm cho tài khoản này, vui lòng đợi")
+
+    session_str = redis_conn.get(f"cookies:{uid}")
+    if not session_str:
+        raise HTTPException(status_code=400, detail="Tài khoản chưa đăng nhập")
+    session_data = json.loads(session_str)
+    
+    # Khóa tạm thời trong Redis (hết hạn sau 5 phút nếu lỗi hệ thống xảy ra)
+    redis_conn.setex(f"scanning_lock:{uid}", 300, "true")
+    
+    # 2. Đồng nhất cấu trúc Payload gửi qua Worker giống endpoint trên
+    task_data = {
+        "uid": uid,
+        "cookie_json": session_data.get("cookies", []),
+        "user_agent": session_data.get("user_agent", ""),
+        "action": "scan_groups",
+        "text_content": "",
+        "image_paths": []
+    }
+    
+    job = queue.enqueue(run_selenium_task, task_data)
+    return {"status": "queued", "job_id": job.id}
+
 @app.get("/", response_class=HTMLResponse)
 def home(request: Request):
-    data_from_db = [
-        {"id": "vip", "name": "Tài khoản VIP"},
-        {"id": "normal", "name": "Tài khoản Thường"}
-    ]
     return templates.TemplateResponse(
         request=request,
-        name="index.html",
-        context={
-            "request": request, 
-            "account_list": data_from_db
-        }
+        name="index.html"
     )
 
 @app.post("/test-post")

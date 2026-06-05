@@ -49,7 +49,6 @@ class FacebookBot:
         print(driver.get_cookies())
         cookies = {c["name"] for c in driver.get_cookies()}
 
-        print(cookies)
         # Fast fail
         if "c_user" not in cookies or "xs" not in cookies:
             return False
@@ -415,7 +414,6 @@ class FacebookBot:
             By.XPATH,
             f".//input[@accept='{valid_file}']"
         )
-        print(img_paths)
         
         for img_path in img_paths:
             file_name = img_path.split('\\')[-1]
@@ -433,9 +431,8 @@ class FacebookBot:
             ".//div[@aria-label='Post']"
         )
 
-        post_btn.click()
+        #post_btn.click()
         print("Đã đăng bài!")
-        
 
 
     def run_actions(self, uid: str, content="", img_paths=[]):
@@ -536,26 +533,72 @@ uids = [
     '100068953794888'
 ]
 
-# Hàm này được gọi bởi queue.enqueue(run_selenium_task, data)
 def run_selenium_task(data: dict):
     uid = data.get("uid")
-    cookies = data.get("cookie_json", [])
-    user_agent = data.get("user_agent", "") # <--- Nhận thêm trường này ở đây
+    action = data.get("action")
+    imgs_path = data.get("image_paths", [])
+
+    # 1. Khởi tạo Bot và cấu hình
+    bot = FacebookBot()
+    bot.user_agent = data.get("user_agent", "")
+
+    try:
+        # 2. Đăng nhập
+        if not bot.login_with_cookies(uid, data.get("cookie_json", [])):
+            print("Failed login!")
+            return {"status": "failed", "reason": "auth_failed", "uid": uid}
+
+        # 3. Điều phối tác vụ (Rẽ nhánh gọi hàm riêng biệt)
+        execute_action_routing(bot, action, data)
+
+        return {"status": "completed", "uid": uid}
+
+    except Exception as e:
+        print(f"[Task {uid}] Lỗi hệ thống: {str(e)}")
+        return {"status": "error", "message": str(e), "uid": uid}
+
+    finally:
+        # 4. Giải phóng tài nguyên (Bắt buộc)
+        bot.close()
+        clean_temporary_images(imgs_path, uid)
+
+def clean_temporary_images(imgs_path: list, uid: str):
+    """Hàm chuyên trách dọn dẹp các file ảnh tạm trên đĩa cứng"""
+    if not imgs_path:
+        return
+
+    print(f"[Task {uid}] Bắt đầu dọn dẹp {len(imgs_path)} file ảnh tạm.")
+    for path in imgs_path:
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                print(f"-> Đã xóa file thành công: {path}")
+        except Exception as e:
+            # Chỉ log lại lỗi chứ không hoãn tiến trình (không raise error ở đây)
+            print(f"-> Không thể xóa file {path}. Lỗi: {str(e)}")
+
+
+def execute_action_routing(bot: FacebookBot, action: str, data: dict):
+    """Hàm chuyên trách việc đọc action và phân phối công việc cho Bot"""
+    uid = data.get("uid")
     content = data.get("text_content", "")
     imgs_path = data.get("image_paths", [])
 
-    print(imgs_path)
+    print(f"[Task {uid}] Đang xử lý action: '{action}'")
 
-    bot = FacebookBot()
-    bot.user_agent = user_agent
-
-    login_success = bot.login_with_cookies(uid, cookies)
-    
-    if login_success:
-        print('Tiến hành chạy tiến trình')
-        bot.run_actions(uid, content, imgs_path)
+    if action == "update-group":
+        groups = bot.scrape_joined_groups()
+        print(groups)
+        try:
+            redis_conn.set(f"groups:{uid}", json.dumps(groups))
+            print(f"🚀 [Worker] Đã lưu thẳng {len(groups)} group vào Redis cho UID {uid}!")
+        except Exception as redis_err:
+            print(f"❌ Lỗi ghi Redis từ Worker: {redis_err}")
         
-
-    bot.close()
-    
-    return {"status": "completed", "uid": uid}
+        
+    elif action == "comment_spam":
+        target_urls = data.get("target_urls", [])
+        bot.comment_to_targets(target_urls, content)
+        
+    else:
+        raise ValueError(f"Action '{action}' không hợp lệ hoặc chưa được hỗ trợ.")
