@@ -83,12 +83,20 @@ def get_groups(uid: str, page: int = 1, page_size: int = 10):
     print("NONE")
     return []
 
+@app.post("/upload")
+async def upload_file(file: UploadFile = File(...)):
+    print(file)
+    return {
+        "filename": file.filename,
+        "content_type": file.content_type
+    }
+
 @app.post("/run-bot")
 async def run_bot(
-    uid: str = Form(...),                        # Bắt buộc
-    action: str = Form(...),                     # Bắt buộc
-    content: str = Form(""),                     # Không bắt buộc (mặc định chuỗi rỗng)
-    images: List[UploadFile] = File(default=[])  # Không bắt buộc (mặc định mảng rỗng)
+    uid: str = Form(...),
+    action: str = Form(...),
+    content: str = Form(""),
+    images: List[UploadFile] = File(...)
 ):
     # 1. Lấy Token/Cookie của UID này từ Redis ra
     print(content)
@@ -113,7 +121,7 @@ async def run_bot(
         # Lấy đường dẫn tuyệt đối (Ví dụ: D:/project/bot_media_tmp/task_100_1.jpg)
         saved_paths.append(os.path.abspath(file_path))
 
-    print(images)
+    
     # 3. Đóng gói dữ liệu bài viết chuyển giao cho Hàng đợi (Queue)
     task_data = {
         "uid": uid,

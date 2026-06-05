@@ -1,5 +1,3 @@
-// imageUploader.js
-
 // Quản lý state bằng Object để tránh ô nhiễm global và dễ mở rộng sau này
 const uploaderState = {
     selectedFiles: [],

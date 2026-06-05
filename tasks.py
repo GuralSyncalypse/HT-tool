@@ -13,6 +13,10 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException
+from selenium.webdriver.remote.file_detector import LocalFileDetector
+
+# 1. Bật tính năng phát hiện file cục bộ
+BASE_DIR = os.path.dirname(os.path.abspath(__file__)) # Thư mục /app
 
 # 1. Kết nối thẳng tới Redis từ file Selenium luôn
 redis_conn = redis.Redis(host='redis', port=6379, decode_responses=True)
@@ -28,7 +32,7 @@ class FacebookBot:
     def setup_driver(self):
         """Hàm phụ trách cấu hình và khởi tạo Chrome Driver"""
         chrome_options = Options()
-        chrome_options.add_argument("--headless=new")  # Chạy ẩn trên background server
+        # chrome_options.add_argument("--headless=new")  # Chạy ẩn trên background server
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--window-size=1920,1080")
@@ -38,6 +42,7 @@ class FacebookBot:
             command_executor=self.remote_url,
             options=chrome_options
         )
+        self.driver.file_detector = LocalFileDetector()
 
     def is_logged_in(self):
         driver = self.driver
@@ -358,7 +363,6 @@ class FacebookBot:
         return joined_groups
 
     def create_post(self, content="", img_paths=[]):
-        self.driver.get("https://www.facebook.com/me")
         post_box_xpath = "//span[contains(text(),'mind') or contains(text(),'nghĩ gì') or contains(text(),'something') or contains(text(),'viết gì')]"
 
         post_box = self.driver.find_element(By.XPATH, post_box_xpath)
@@ -382,8 +386,22 @@ class FacebookBot:
             ".//div[@role='textbox']"
         )
 
+        # 1. Tìm element cần điền
+
         editor.click()
-        editor.send_keys(content)
+        self.driver.execute_script("""
+            var element = arguments[0];
+            var text = arguments[1];
+            
+            // 1. Gán text (bao gồm cả Emoji) vào thẻ div
+            element.innerText = text;
+            
+            // 2. Kích hoạt liên tiếp các sự kiện để React/Vue/Angular cập nhật State
+            element.dispatchEvent(new Event('focus', { bubbles: true }));
+            element.dispatchEvent(new Event('input', { bubbles: true }));
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+            element.dispatchEvent(new Event('blur', { bubbles: true }));
+        """, editor, content)
 
         print("Đã nhập nội dung")
 
@@ -397,10 +415,27 @@ class FacebookBot:
             By.XPATH,
             f".//input[@accept='{valid_file}']"
         )
-
+        print(img_paths)
+        
         for img_path in img_paths:
-            print(f"Thêm ảnh {img_path}")
-            file_input.send_keys(img_path)
+            file_name = img_path.split('\\')[-1]
+            file_path = os.path.join(BASE_DIR, "bot_media_tmp", file_name)
+
+
+            print(file_path)
+            file_input.send_keys(file_path)
+
+        
+        time.sleep(1)
+        #
+        post_btn = composer.find_element(
+            By.XPATH,
+            ".//div[@aria-label='Post']"
+        )
+
+        post_btn.click()
+        print("Đã đăng bài!")
+        
 
 
     def run_actions(self, uid: str, content="", img_paths=[]):
@@ -426,6 +461,10 @@ class FacebookBot:
             # except Exception as redis_err:
             #     print(f"❌ Lỗi ghi Redis từ Worker: {redis_err}")
 
+            self.driver.get('https://www.facebook.com/groups/502928924130697')
+            self.create_post(content, img_paths)
+
+            self.driver.get('https://www.facebook.com/groups/quantanbin')
             self.create_post(content, img_paths)
 
             time.sleep(5) # Giả lập thời gian bot làm việc

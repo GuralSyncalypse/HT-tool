@@ -1,19 +1,18 @@
 // main.js
 import { loadActiveAccounts, loadGroups } from "./groups.js";
-import { initBotButton } from "./bot.js";
-import { initImageUploader } from "./imageUploader.js"; // Import file xử lý ảnh
+import { initImageUploader } from "./imageUploader.js"; 
+import { initPostButton } from "./bot.js"; // Import bình thường
 
 document.addEventListener("DOMContentLoaded", () => {
-
-    // Khởi tạo các logic hệ thống cũ
     loadActiveAccounts();
-    initBotButton();
+
+    // 1. Khởi tạo uploader
+    initImageUploader();
+
+    // 2. Khởi tạo logic nút gửi bài
+    initPostButton(); 
 
     document.getElementById("select-uid").addEventListener("change", (e) => {
         loadGroups(e.target.value);
     });
-
-    // Khởi tạo logic quản lý ảnh độc lập
-    initImageUploader();
-    
 });
