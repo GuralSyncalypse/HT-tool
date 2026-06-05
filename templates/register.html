@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng ký tài khoản</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #f8fafc;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-6 bg-[#f8fafc]">
+
+    <div class="w-full max-w-md bg-white rounded-2xl shadow-xs p-8 border border-gray-100 flex flex-col">
+        <div class="text-center mb-8">
+            <div class="w-12 h-12 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center text-xl mx-auto mb-3">
+                <i class="fa-solid fa-user-plus"></i>
+            </div>
+            <h2 class="text-2xl font-bold text-gray-800">Tạo tài khoản mới</h2>
+            <p class="text-sm text-gray-400 mt-1">Đăng ký nhanh trong vài bước đơn giản</p>
+        </div>
+
+        <form id="registerForm" class="space-y-4">
+            <div id="alertMessage" class="hidden p-3 text-xs font-medium rounded-lg border"></div>
+
+            <div class="space-y-1.5">
+                <label class="text-xs font-bold text-gray-700">Tên đăng nhập</label>
+                <div class="relative focus-within:text-blue-500 text-gray-400">
+                    <span class="absolute inset-y-0 left-3 flex items-center">
+                        <i class="fa-solid fa-user text-sm"></i>
+                    </span>
+                    <input type="text" id="username" required placeholder="Username viết liền" 
+                           class="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-700 outline-hidden focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition">
+                </div>
+            </div>
+
+            <div class="space-y-1.5">
+                <label class="text-xs font-bold text-gray-700">Địa chỉ Email</label>
+                <div class="relative focus-within:text-blue-500 text-gray-400">
+                    <span class="absolute inset-y-0 left-3 flex items-center">
+                        <i class="fa-solid fa-envelope text-sm"></i>
+                    </span>
+                    <input type="email" id="email" required placeholder="name@example.com" 
+                           class="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-700 outline-hidden focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition">
+                </div>
+            </div>
+
+            <div class="space-y-1.5">
+                <label class="text-xs font-bold text-gray-700">Mật khẩu</label>
+                <div class="relative focus-within:text-blue-500 text-gray-400">
+                    <span class="absolute inset-y-0 left-3 flex items-center">
+                        <i class="fa-solid fa-lock text-sm"></i>
+                    </span>
+                    <input type="password" id="password" required placeholder="Tối thiểu 6 ký tự" 
+                           class="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-2 text-sm text-gray-700 outline-hidden focus:border-blue-400 focus:ring-1 focus:ring-blue-400 transition">
+                </div>
+            </div>
+
+            <div class="flex items-start">
+                <input type="checkbox" id="terms" required class="mt-0.5 w-4 h-4 rounded-sm border-gray-300 text-blue-600 focus:ring-blue-500">
+                <label for="terms" class="ml-2 text-xs font-medium text-gray-500 cursor-pointer select-none">Tôi đồng ý với điều khoản sử dụng hệ thống</label>
+            </div>
+
+            <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold text-sm py-2.5 rounded-lg transition shadow-xs cursor-pointer mt-2">
+                Đăng ký tài khoản
+            </button>
+        </form>
+
+        <div class="text-center mt-6 pt-6 border-t border-gray-100">
+            <p class="text-xs text-gray-500">
+                Đã có tài khoản rồi? 
+                <a href="/login" class="text-blue-600 font-bold hover:underline">Đăng nhập</a>
+            </p>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('registerForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const alertDiv = document.getElementById('alertMessage');
+            alertDiv.className = 'hidden p-3 text-xs font-medium rounded-lg border';
+
+            const payload = {
+                username: document.getElementById('username').value,
+                email: document.getElementById('email').value,
+                password: document.getElementById('password').value
+            };
+
+            try {
+                const response = await fetch('/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    alertDiv.innerText = 'Đăng ký thành công! Đang chuyển hướng sang trang đăng nhập...';
+                    alertDiv.classList.add('bg-green-50', 'text-green-600', 'border-green-100');
+                    alertDiv.classList.remove('hidden');
+                    setTimeout(() => {
+                        window.location.href = '/login';
+                    }, 2000);
+                } else {
+                    alertDiv.innerText = data.detail || 'Đăng ký thất bại';
+                    alertDiv.classList.add('bg-red-50', 'text-red-600', 'border-red-100');
+                    alertDiv.classList.remove('hidden');
+                }
+            } catch (err) {
+                alertDiv.innerText = 'Lỗi kết nối máy chủ';
+                alertDiv.classList.add('bg-red-50', 'text-red-600', 'border-red-100');
+                alertDiv.classList.remove('hidden');
+            }
+        });
+    </script>
+</body>
+</html>

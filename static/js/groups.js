@@ -4,7 +4,7 @@ let allGroups = [];
 let currentPage = 1;
 const pageSize = 10;
  
-export async function loadGroups(uid) {
+export async function loadGroups(username, uid) {
     if (!uid) {
         renderEmptyState();
         return;

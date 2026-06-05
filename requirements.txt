@@ -4,3 +4,8 @@ selenium
 openpyxl
 regex
 requests
+uvicorn
+sqlmodel
+psycopg2-binary
+pwdlib[bcrypt]
+pyjwt[crypto]

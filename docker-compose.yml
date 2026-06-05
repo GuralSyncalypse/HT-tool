@@ -1,4 +1,25 @@
+version: '3.8'
+
 services:
+  # --- DỊCH VỤ POSTGRESQL (Lưu thông tin tài khoản vĩnh viễn) ---
+  postgres_db:
+    image: postgres:15-alpine
+    container_name: fastapi_postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: htland
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d htland"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- DỊCH VỤ REDIS (Lưu phiên đăng xuất / Blacklist Token) ---
   redis:
     image: redis:7-alpine
     container_name: redis
@@ -6,6 +27,7 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    # Bật chế độ AOF để ghi dữ liệu từ RAM xuống đĩa liên tục
     command: redis-server --appendonly yes
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -38,5 +60,8 @@ services:
       - SELENIUM_REMOTE_URL=http://chrome:4444/wd/hub # Khai báo đường dẫn kết nối tới container chrome
 
 volumes:
+  postgres_data:
+    driver: local
   redis_data:
+    driver: local
   worker_data:

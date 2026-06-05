@@ -15,6 +15,13 @@ from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException
 from selenium.webdriver.remote.file_detector import LocalFileDetector
 
+from sqlmodel import create_engine, Session, select
+from models import User, UserRegister, UserResponse
+from sqlalchemy.orm.attributes import flag_modified
+
+POSTGRES_URL = "postgresql://postgres:admin@postgres_db:5432/htland"
+engine = create_engine(POSTGRES_URL, echo=False)
+
 # 1. Bật tính năng phát hiện file cục bộ
 BASE_DIR = os.path.dirname(os.path.abspath(__file__)) # Thư mục /app
 
@@ -532,6 +539,56 @@ uids = [
     '100091656182252',
     '100068953794888'
 ]
+
+def run_selenium_scan_group(data: dict):
+    uid = data.get("uid")
+    username = data.get("username")
+
+    bot = FacebookBot()
+    bot.user_agent = data.get("user_agent", "")
+
+
+    try:
+        # 2. Đăng nhập
+        if not bot.login_with_cookies(uid, data.get("cookie_json", [])):
+            print("Failed login!")
+            return {"status": "failed", "reason": "auth_failed", "uid": uid}
+
+        # 3. Điều phối tác vụ (Rẽ nhánh gọi hàm riêng biệt)
+        groups = bot.scrape_joined_groups()
+        print(groups)
+
+        with Session(engine) as session:
+            # 1. Tìm User trong DB dựa vào UID (ở đây giả định cột username lưu UID)
+            statement = select(User).where(User.username == username)
+            user = session.exec(statement).first()
+            
+            if user:
+                # 2. Cập nhật mảng nhóm mới cào được vào trường JSONB
+                if uid not in user.social_data:
+                    user.social_data[uid] = {
+                        "group_uids": [],
+                        "friend_uids": []
+                    }
+
+                user.social_data[uid]["group_uids"] = groups
+
+                flag_modified(user, "social_data")
+
+                session.add(user)
+                session.commit()
+                print(f"🚀 [Worker] Đã lưu {len(groups)} groups vào Postgres JSONB cho UID {uid}!")
+            else:
+                print(f"❌ Không tìm thấy User có UID {uid} trong Database để lưu groups")
+
+        return {"status": "completed", "uid": uid}
+
+    except Exception as e:
+        print(f"[Task {uid}] Lỗi hệ thống: {str(e)}")
+        return {"status": "error", "message": str(e), "uid": uid}
+
+    finally:
+        bot.close()
 
 def run_selenium_task(data: dict):
     uid = data.get("uid")

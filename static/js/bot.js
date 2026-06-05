@@ -1,4 +1,3 @@
-const runBotBtn = document.getElementById("btn-run-bot");
 const imageInput = document.getElementById("imageInput");
 const imagePreviewContainer = document.getElementById("imagePreviewContainer");
 const startBtn = document.getElementById("btn-start")
@@ -59,69 +58,51 @@ const selectUid = document.getElementById("select-uid");
 // }
 
 export function initUpdateGroupButton() {
-    const btnUpdateGroup = document.getElementById("btn-update-group"); // ID nút gửi bài của bạn
+    const btnUpdate = document.getElementById("btn-update-group");
+    
+    // Kiểm tra xem nút có tồn tại trên giao diện không trước khi gán sự kiện
+    if (!btnUpdate) return; 
 
-    if (!btnUpdateGroup) return;
-
-    btnUpdateGroup.addEventListener("click", async () => {
-        // 1. Lấy dữ liệu từ giao diện
-        const uid = document.getElementById("select-uid")?.value;
-        const action = "update-group"; // Hoặc lấy từ input/dropdown của bạn
-        const content = document.getElementById("content-box")?.value || "";
-        
-        // 2. Lấy danh sách file ảnh từ module uploader
-        const selectedFiles = getSelectedFiles(); 
-
-        if (!uid || !action) {
-            alert("Vui lòng điền đầy đủ thông tin UID và Action!");
+    btnUpdate.addEventListener("click", async function() {
+        // 1. Lấy đúng phần tử select-uid từ DOM
+        const selectUidElement = document.getElementById("select-uid");
+        if (!selectUidElement) {
+            alert("Không tìm thấy phần tử chọn UID trên giao diện!");
             return;
         }
 
-        // 3. Khởi tạo FormData
+        const uid = selectUidElement.value; 
+
+        if (!uid) {
+            alert("Không tìm thấy UID cần cập nhật!");
+            return;
+        }
+
+        const usernameElement = document.getElementById("user-display-name");
+        const username = usernameElement ? usernameElement.innerText.trim() : "";
+
+        // 2. Tạo FormData để gửi lên API dạng Form(...)
         const formData = new FormData();
         formData.append("uid", uid);
-        formData.append("action", action);
-        formData.append("content", content);
-
-        // 4. QUAN TRỌNG: Loop qua mảng file và append chung vào 1 key 'images'
-        selectedFiles.forEach((file) => {
-            formData.append("images", file); 
-        });
+        formData.append("username", username)
 
         try {
-            btnPost.disabled = true;
-            btnPost.innerText = "Đang gửi...";
-
-            // 5. Gửi request lên FastAPI
-            const response = await fetch("/run-bot", {
+            // Thay đổi URL cho đúng với domain/port của project bạn
+            const response = await fetch("http://localhost:8000/bot/scan-group", {
                 method: "POST",
-                body: formData 
-                // LƯU Ý: KHÔNG set Header 'Content-Type'. 
-                // Trình duyệt sẽ tự định nghĩa Content-Type là multipart/form-data kèm boundary chuẩn xác.
+                body: formData // Không cần set Headers "Content-Type"
             });
 
+            const result = await response.json();
+
             if (response.ok) {
-                const result = await response.json();
-                alert("Gửi bài thành công!");
-                
-                // 6. Reset uploader sau khi gửi thành công để giải phóng bộ nhớ
-                const btnSelectImage = document.getElementById('btnSelectImage');
-                const imagePreviewContainer = document.getElementById('imagePreviewContainer');
-                resetUploader(btnSelectImage, imagePreviewContainer);
-                if (document.getElementById("contentInput")) {
-                    document.getElementById("contentInput").value = "";
-                }
+                alert(`Đã thêm tác vụ cập nhật vào hàng đợi! Job ID: ${result.job_id}`);
             } else {
-                const errorData = await response.json();
-                console.error("Lỗi từ server:", errorData);
-                alert("Có lỗi xảy ra khi gửi bài!");
+                alert(`Lỗi: ${result.detail || "Không thể chạy bot"}`);
             }
         } catch (error) {
             console.error("Lỗi kết nối:", error);
-            alert("Không thể kết nối tới server!");
-        } finally {
-            btnPost.disabled = false;
-            btnPost.innerText = "Đăng bài";
+            alert("Không thể kết nối tới Server API!");
         }
     });
 }
