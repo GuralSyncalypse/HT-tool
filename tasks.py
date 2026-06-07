@@ -1,23 +1,40 @@
+# ==========================================
+# NHÓM 1: Thư viện chuẩn của Python (Built-in)
+# ==========================================
+from datetime import datetime, timedelta, timezone
+import json
 import os
-import time
 import random
 import re
-import redis
-import json
+import time
+
+# ==========================================
+# NHÓM 2: Thư viện bên thứ ba (Third-party)
+# ==========================================
 from openpyxl import Workbook
+import redis
 from selenium import webdriver
+from selenium.common.exceptions import (
+    ElementClickInterceptedException,
+    NoSuchElementException,
+    TimeoutException,
+)
+from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException, NoSuchElementException, ElementClickInterceptedException
 from selenium.webdriver.remote.file_detector import LocalFileDetector
-
-from sqlmodel import create_engine, Session, select
-from models import User, UserRegister, UserResponse
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 from sqlalchemy.orm.attributes import flag_modified
+from sqlmodel import Session, create_engine, select
+
+# ==========================================
+# NHÓM 3: Modules nội bộ (Tự tạo)
+# ==========================================
+from models import SocialAccount, User, UserRegister, UserResponse
+vnTimeDelta = timedelta(hours=7)
+vnTZObject = timezone(vnTimeDelta, name="ICT")
 
 POSTGRES_URL = "postgresql://postgres:admin@postgres_db:5432/htland"
 engine = create_engine(POSTGRES_URL, echo=False)
@@ -559,27 +576,57 @@ def run_selenium_scan_group(data: dict):
         print(groups)
 
         with Session(engine) as session:
-            # 1. Tìm User trong DB dựa vào UID (ở đây giả định cột username lưu UID)
-            statement = select(User).where(User.username == username)
-            user = session.exec(statement).first()
+            # 1. Tìm tài khoản bằng UID trong bảng social_accounts
+            statement = select(SocialAccount).where(SocialAccount.uid == uid)
+            account = session.exec(statement).first()
             
-            if user:
-                # 2. Cập nhật mảng nhóm mới cào được vào trường JSONB
-                if uid not in user.social_data:
-                    user.social_data[uid] = {
-                        "group_uids": [],
-                        "friend_uids": []
-                    }
+            if not account:
+                print(f"⚠️ UID {uid} chưa tồn tại. Tiến hành tạo mới...")
+                
+                # 1.1. Tìm User_id dựa vào username để gắn liên kết (Foreign Key)
+                user_statement = select(User).where(User.username == username)
+                user = session.exec(user_statement).first()
+                
+                if not user:
+                    print(f"❌ Không thể tạo SocialAccount vì không tìm thấy User chính có tên: {username}")
+                    # Dừng luồng xử lý của job này ở đây vì dữ liệu mồ côi, không biết của ai
+                    return 
+                    
+                # 1.2. Khởi tạo đối tượng SocialAccount mới tinh
+                account = SocialAccount(
+                    uid=uid,
+                    username=username, # Tên của UID (nếu có)
+                    user_id=user.id,   # Gắn ID của User vừa tìm được
+                    groups_data=[]     # Mảng trống để tí nữa đổ dữ liệu vào
+                )
+                session.add(account)
+                print(f"✨ Đã khởi tạo tài khoản mới cho UID {uid} thuộc User {username}")
 
-                user.social_data[uid]["group_uids"] = groups
+                # 2. Xử lý chống trùng lặp nhóm (Idempotency)
+                # Lấy danh sách ID các nhóm hiện tại đang có trong DB của UID này
+                existing_ids = {g.get("group_id") for g in account.groups_data if "group_id" in g}
 
-                flag_modified(user, "social_data")
+                # Lọc lấy những nhóm thực sự mới từ danh sách Worker vừa cào được
+                new_groups = [g for g in groups if g.get("group_id") not in existing_ids]
 
-                session.add(user)
-                session.commit()
-                print(f"🚀 [Worker] Đã lưu {len(groups)} groups vào Postgres JSONB cho UID {uid}!")
+                if new_groups:
+                    # 3. Nối thẳng danh sách nhóm mới vào mảng phẳng groups_data
+                    account.groups_data.extend(new_groups)
+                    account.updated_at = datetime.now(vnTZObject)
+                    
+                    # Ép SQLAlchemy nhận biết trường JSONB này đã bị thay đổi
+                    flag_modified(account, "groups_data")
+                    
+                    session.add(account)
+                    session.commit()
+                    print(f"🚀 [Worker] Đã cập nhật thêm {len(new_groups)} nhóm mới vào Postgres cho UID {uid}!")
+                else:
+                    print(f"ℹ️ [Worker] UID {uid}: Không tìm thấy nhóm mới nào để thêm (Tất cả đã tồn tại).")
+                    
             else:
-                print(f"❌ Không tìm thấy User có UID {uid} trong Database để lưu groups")
+                # Trường hợp không tìm thấy, bạn có thể tự động tạo mới một bản ghi SocialAccount nếu muốn,
+                # nhưng ở đây ta xử lý log báo lỗi giống như logic cũ của bạn:
+                print(f"❌ Không tìm thấy tài khoản có UID {uid} trong bảng social_accounts để lưu groups")
 
         return {"status": "completed", "uid": uid}
 

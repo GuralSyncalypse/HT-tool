@@ -1,46 +1,53 @@
-import time
-from fastapi import FastAPI, Request, HTTPException, Query, Form, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+import json
 import os
-from typing import Dict, List, Any
+import time
+from typing import Any, Dict, List
+
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel
 from redis import Redis
 from rq import Queue
-from tasks import run_selenium_task, run_selenium_scan_group
-from pydantic import BaseModel
-import json
-from fastapi.staticfiles import StaticFiles
-
-from fastapi import FastAPI, Depends, HTTPException, status
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlmodel import Session, select
+from contextlib import asynccontextmanager
 
-# Tự tạo
-from database import init_db, get_db_session, redis_client
-from models import User, UserRegister, UserResponse
-from security import hash_password, verify_password, create_access_token, decode_access_token
+# Modules nội bộ (Tự tạo)
+from database import get_db_session, init_db, redis_client
+from models import GroupDetail, SocialAccount, User, UserRegister, UserResponse
+from security import create_access_token, decode_access_token, hash_password, verify_password
+from tasks import run_selenium_scan_group, run_selenium_task
 
+# 1. Thay thế cho @app.on_event("startup") đã bị khai tử
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Hành động khi ứng dụng BẮT ĐẦU chạy
+    init_db()
+    yield
+    # Hành động khi ứng dụng DỪNG (nếu có, ví dụ: đóng kết nối DB, ngắt kết nối Redis)
+    pass
 
-app = FastAPI()
+# Khởi tạo app với lifespan
+app = FastAPI(lifespan=lifespan)
 
+# 2. Cấu hình Middleware (Cần lưu ý khi lên Production)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # Xem lưu ý bảo mật bên dưới
+    allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
 )
 
+# 3. Mount thư mục chứa file tĩnh (Đảm bảo thư mục "static" đã tồn tại)
 app.mount(
     "/static",
     StaticFiles(directory="static"),
     name="static"
 )
-
-# Khởi tạo DB khi ứng dụng chạy lần đầu
-@app.on_event("startup")
-def on_startup():
-    init_db()
 
 # Cấu hình OAuth2 chuẩn để test được trên giao diện /docs của FastAPI
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="login")
@@ -51,11 +58,6 @@ redis_conn = Redis(host="localhost", port=6379)
 queue = Queue(connection=redis_conn)
 
 
-class GroupInfo(BaseModel):
-    group_name: str
-    group_id: str
-    group_url: str
-
 class CookieData(BaseModel):
     uid: str
     cookie_json: list
@@ -64,9 +66,26 @@ class CookieData(BaseModel):
 class BotRequest(BaseModel):
     uid: str
 
+class PaginatedGroupResponse(BaseModel):
+    total: int
+    data: List[GroupDetail]
+
 # Tạo thư mục lưu ảnh tạm thời trên server nếu chưa có
 UPLOAD_DIR = "./bot_media_tmp"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+# Endpoint nhận danh sách groups
+@app.post("/api/groups/process")
+def process_user_groups(
+    groups: List[GroupDetail], 
+):
+    print(f"Nhận được {len(groups)} groups gửi lên từ frontend.")
+    
+    # Xử lý logic của bạn ở đây (Vòng lặp lưu DB hoặc kích hoạt Bot...)
+    for group in groups:
+        print(f"Đang xử lý Group ID: {group.group_id} - Name: {group.group_name}")
+        
+    return {"status": "success", "message": f"Đã xử lý {len(groups)} nhóm thành công"}
 
 @app.get("/api/active-accounts")
 def get_active_accounts():
@@ -93,7 +112,7 @@ def save_cookie(data: CookieData):
     
     return {"status": "Đã lưu vào Redis thành công", "uid": data.uid}
 
-@app.get("/api/get-groups/{uid}", response_model=List[str])
+@app.get("/api/get-groups", response_model=PaginatedGroupResponse)
 def get_groups(
     uid: str,
     username: str, 
@@ -101,36 +120,35 @@ def get_groups(
     page_size: int = 10, 
     db: Session = Depends(get_db_session)
 ):
-    # 1. Khởi tạo câu lệnh select truy vấn User
-    # Nếu uid của bạn là ID (int), hãy dùng: select(User).where(User.id == int(uid))
-    # Dưới đây là ví dụ tổng quát tìm theo username hoặc id ép kiểu:
-    statement = select(User).where(User.username == username)
-        
-    user = db.exec(statement).first()
+    # 1. Tìm account dựa trên uid và username
+    statement = select(SocialAccount).where(
+        SocialAccount.uid == uid,
+        SocialAccount.username == username
+    )
+    account = db.exec(statement).first()
     
-    # 2. Kiểm tra nếu không tìm thấy User
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Không tìm thấy người dùng với UID này"
-        )
-        
-    # 3. Lấy danh sách groups (mặc định là mảng rỗng nếu null)
-    all_groups = user.social_data[uid].group_uids or []
+    # Nếu không tìm thấy account, trả về total = 0 và mảng rỗng đúng cấu trúc
+    if not account:
+        return {"total": 0, "data": []}
+
+    # 2. Lấy toàn bộ mảng từ trường JSONB
+    all_groups = account.groups_data or []
     
-    # 4. Xử lý phân trang (Pagination) trên mảng Python
-    # Page 1: từ index 0 đến 10
-    # Page 2: từ index 10 đến 20
-    start_idx = (page - 1) * page_size
-    end_idx = start_idx + page_size
-    
-    paginated_groups = all_groups[start_idx:end_idx]
-    
-    return paginated_groups
+    # 3. Lấy TỔNG SỐ LƯỢNG phần tử có trong mảng JSONB này
+    total_count = len(all_groups)
+
+    # 4. Phân trang bằng kỹ thuật Slice của Python
+    offset = (page - 1) * page_size
+    paginated_groups = all_groups[offset : offset + page_size]
+
+    # 5. Trả về đúng cấu trúc như Schema đã khai báo
+    return {
+        "total": total_count,
+        "data": paginated_groups
+    }
 
 @app.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
-    print(file)
     return {
         "filename": file.filename,
         "content_type": file.content_type
@@ -192,6 +210,7 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 # --- 4. API LẤY THÔNG TIN CÁ NHÂN ---
 @app.get("/users/me", response_model=UserResponse)
 def read_users_me(current_user: User = Depends(get_current_user)):
+    print(current_user)
     return current_user
 
 # --- 5. API ĐĂNG XUẤT (LƯU VÀO REDIS) ---
