@@ -88,7 +88,7 @@ export function initUpdateGroupButton() {
 
         try {
             // Thay đổi URL cho đúng với domain/port của project bạn
-            const response = await fetch("http://localhost:8000/bot/scan-group", {
+            const response = await fetch("/api/v1/bot/scan-group", {
                 method: "POST",
                 body: formData // Không cần set Headers "Content-Type"
             });
@@ -109,71 +109,102 @@ export function initUpdateGroupButton() {
 
 // bot.js
 import { getSelectedFiles, resetUploader } from "./imageUploader.js";
+import { selectedGroups } from "./groups.js";
+import { fetchWithAuth } from "./main.js";
 
 export function initPostButton() {
-    const btnPost = document.getElementById("btn-start"); // ID nút gửi bài của bạn
-
+    const btnPost = document.getElementById("btn-start");
     if (!btnPost) return;
 
     btnPost.addEventListener("click", async () => {
-        // 1. Lấy dữ liệu từ giao diện
         const uid = document.getElementById("select-uid")?.value;
-        const action = "POST"; // Hoặc lấy từ input/dropdown của bạn
+        // Lấy thêm username hiển thị trên UI để làm căn cứ khớp query cho Backend
+        const usernameElement = document.getElementById("user-display-name"); 
+        const username = usernameElement ? usernameElement.innerText.trim() : "";
         const content = document.getElementById("content-box")?.value || "";
-        
-        // 2. Lấy danh sách file ảnh từ module uploader
         const selectedFiles = getSelectedFiles(); 
 
-        if (!uid || !action) {
-            alert("Vui lòng điền đầy đủ thông tin UID và Action!");
-            return;
-        }
+        if (!uid || !username) { alert("Vui lòng chọn tài khoản hợp lệ!"); return; }
 
-        // 3. Khởi tạo FormData
+
+        if (content == '') {
+            alert("Vui lòng nhập nội dung!");
+            return;
+        }   
+
+        // 2. Khởi tạo FormData
         const formData = new FormData();
         formData.append("uid", uid);
-        formData.append("action", action);
+        formData.append("username", username);
         formData.append("content", content);
 
-        // 4. QUAN TRỌNG: Loop qua mảng file và append chung vào 1 key 'images'
-        selectedFiles.forEach((file) => {
-            formData.append("images", file); 
-        });
+        // 🌟 3. LOGIC QUAN TRỌNG: Mặc định gửi "ALL", có chọn thì gửi mảng string JSON
+        if (selectedGroups.length === 0) {
+            formData.append("group_ids", "ALL");
+        } else {
+            formData.append("group_ids", JSON.stringify(selectedGroups));
+        }
+
+        // Đính kèm danh sách file ảnh
+        selectedFiles.forEach((file) => { formData.append("images", file); });
 
         try {
             btnPost.disabled = true;
             btnPost.innerText = "Đang gửi...";
 
-            // 5. Gửi request lên FastAPI
-            const response = await fetch("/run-bot", {
+            const response = await fetch("/api/v1/bot/post-by-group-ids", {
                 method: "POST",
-                body: formData 
-                // LƯU Ý: KHÔNG set Header 'Content-Type'. 
-                // Trình duyệt sẽ tự định nghĩa Content-Type là multipart/form-data kèm boundary chuẩn xác.
+                body: formData // Trình duyệt tự sinh multipart/form-data
             });
 
             if (response.ok) {
-                const result = await response.json();
-                alert("Gửi bài thành công!");
-                
-                // 6. Reset uploader sau khi gửi thành công để giải phóng bộ nhớ
-                const btnSelectImage = document.getElementById('btnSelectImage');
-                const imagePreviewContainer = document.getElementById('imagePreviewContainer');
-                resetUploader(btnSelectImage, imagePreviewContainer);
-                if (document.getElementById("contentInput")) {
-                    document.getElementById("contentInput").value = "";
-                }
+                alert("Đã gửi tác vụ đăng bài lên Server thành công!");
+                // Clear nội dung content-box và ảnh preview tại đây...
+                document.getElementById("content-box").value = ''
+                resetUploader(btnPost, imagePreviewContainer)
             } else {
-                const errorData = await response.json();
-                console.error("Lỗi từ server:", errorData);
-                alert("Có lỗi xảy ra khi gửi bài!");
+                alert("Gửi bài thất bại, vui lòng kiểm tra cấu hình.");
             }
         } catch (error) {
             console.error("Lỗi kết nối:", error);
-            alert("Không thể kết nối tới server!");
         } finally {
             btnPost.disabled = false;
             btnPost.innerText = "Đăng bài";
         }
     });
 }
+
+
+// export async function sendGroupsToBackend() {
+//     // 1. Kiểm tra xem bộ nhớ allGroups toàn cục có dữ liệu hay không
+//     if (!allGroups || allGroups.length === 0) {
+//         alert("Hiện tại chưa có dữ liệu nhóm nào được tải về UI!");
+//         return;
+//     }
+
+//     // 2. Vét sạch TOÀN BỘ group_id của tất cả các trang đã lưu trong allGroups
+//     const wholeGroupIds = allGroups.map(group => group.group_id);
+
+//     console.log(`🎯 Đã thu thập tổng cộng ${wholeGroupIds.length} ID từ tất cả các trang:`, wholeGroupIds);
+
+//     try {
+//         // 3. Gọi fetchWithAuth và truyền THẲNG mảng vào body (không bọc qua payload object)
+//         const response = await fetchWithAuth("/api/v1/bot/post-by-group-ids", {
+//             method: "POST",
+//             headers: {
+//                 "Content-Type": "application/json"
+//             },
+//             body: JSON.stringify(wholeGroupIds) // <-- Gửi trực tiếp mảng ["id1", "id2", ...]
+//         });
+
+//         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+//         const result = await response.json();
+//         alert(`Thành công! Đã gửi toàn bộ ${wholeGroupIds.length} nhóm xuống Backend để chạy Selenium.`);
+//         console.log("Kết quả nhận được từ server:", result);
+
+//     } catch (error) {
+//         console.error("Lỗi khi gửi danh sách tổng xuống backend:", error);
+//         alert("Gửi dữ liệu thất bại. Hãy kiểm tra lại kết nối mạng hoặc log của server.");
+//     }
+// }

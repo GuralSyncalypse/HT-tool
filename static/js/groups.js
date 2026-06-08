@@ -8,12 +8,15 @@ const container = document.getElementById("group-container");
 // ==========================================
 // KHAI BÁO BIẾN TRẠNG THÁI TOÀN CỤC (GLOBAL STATE)
 // ==========================================
-let allGroups = [];
+export let selectedGroups = [];
+export let displayGroups = [];
+
+// Sức chứa của 1 trang
 let currentPage = 1;
 const pageSize = 10;
+
 let totalGroupsCount = 0; 
 
-// Sửa lỗi: Khai báo bộ nhớ đệm global chuẩn bằng từ khóa let
 let currentUsername = "";
 let currentUid = "";
 
@@ -24,7 +27,6 @@ let currentUid = "";
  * @param {number} page - Trang cần lấy (mặc định là 1)
  */
 export async function loadGroups(username, uid, page = 1) {
-    // BẢO VỆ BIẾN: Khống chế hoàn toàn lỗi UI bị render chậm hiển thị chữ "..."
     if ((!username || username === "..." || username.trim() === "") && currentUsername) {
         username = currentUsername;
     }
@@ -37,12 +39,11 @@ export async function loadGroups(username, uid, page = 1) {
         return;
     }
 
-    // Ghi đè cập nhật vào bộ nhớ cache global
     currentUsername = username;
     currentUid = uid;
     currentPage = page;
 
-    console.log(`🚀 Gọi API chuẩn với Username: ${username} | UID: ${uid} | Page: ${page}`);
+    console.log(`🚀 Gọi API với Username: ${username} | UID: ${uid} | Page: ${page}`);
 
     try {
         const params = new URLSearchParams({
@@ -52,8 +53,7 @@ export async function loadGroups(username, uid, page = 1) {
             page_size: pageSize.toString()
         });
 
-        // Sửa lỗi: Sử dụng fetchWithAuth thay vì fetch thuần để đính kèm Token
-        const response = await fetchWithAuth(`/api/get-groups?${params.toString()}`);
+        const response = await fetchWithAuth(`/api/v1/get-groups?${params.toString()}`);
         if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
 
         const result = await response.json(); 
@@ -61,8 +61,11 @@ export async function loadGroups(username, uid, page = 1) {
         totalGroupsCount = result.total || groups.length; 
 
         if (groups && groups.length > 0) {
-            allGroups = groups; 
+            displayGroups = groups; 
+            
+            // Tiến hành render danh sách chính và phân trang
             renderPage(); 
+            renderPagination();
         } else {
             renderEmptyState();
         }
@@ -72,82 +75,39 @@ export async function loadGroups(username, uid, page = 1) {
     }
 }
 
-function renderPagination() {
-    const pagination = document.getElementById("pagination");
-    if (!pagination) return;
-    
-    pagination.innerHTML = "";
-
-    const totalPages = Math.ceil(totalGroupsCount / pageSize);
-    if (totalPages <= 1) return; // Chỉ có 1 trang thì không hiện
-
-    // Mảng chứa các số trang sẽ được hiển thị ra màn hình
-    let pagesToShow = [];
-
-    // Số lượng trang xung quanh trang hiện tại muốn hiển thị (Ví dụ: trang hiện tại là 5, hiển thị thêm số 4 và 6)
-    const delta = 1; 
-
-    for (let i = 1; i <= totalPages; i++) {
-        // Luôn hiển thị trang đầu, trang cuối, và các trang nằm trong khoảng delta của currentPage
-        if (
-            i === 1 || 
-            i === totalPages || 
-            (i >= currentPage - delta && i <= currentPage + delta)
-        ) {
-            pagesToShow.push(i);
-        }
-    }
-
-    // Tiến hành vẽ các nút dựa trên mảng pagesToShow và chèn dấu "..."
-    let lastPage = 0;
-    
-    pagesToShow.forEach(page => {
-        // Nếu khoảng cách giữa 2 trang lớn hơn 1, chèn một nút dấu ba chấm "..."
-        if (lastPage !== 0 && page - lastPage > 1) {
-            const dots = document.createElement("span");
-            dots.textContent = "...";
-            dots.className = "px-3 py-1 text-gray-400 mx-1 align-middle select-none";
-            pagination.appendChild(dots);
-        }
-
-        // Tạo nút bấm số trang
-        const btn = document.createElement("button");
-        btn.setAttribute("type", "button");
-        btn.textContent = page;
-
-        // CSS Tailwind cho nút bấm
-        btn.className = page === currentPage
-            ? "px-3 py-1 bg-blue-500 text-white rounded font-medium mx-1 cursor-pointer shadow-xs transition"
-            : "px-3 py-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50 mx-1 cursor-pointer transition";
-
-        // Gắn sự kiện click gọi API lấy trang mới
-        btn.addEventListener("click", (e) => {
-            e.preventDefault();
-            loadGroups(currentUsername, currentUid, page);
-        });
-
-        pagination.appendChild(btn);
-        lastPage = page;
-    });
-}
-
+/**
+ * Hàm render danh sách group chính ở trang hiện tại
+ */
+/**
+ * Hàm render danh sách group chính ở trang hiện tại
+ * ĐÃ SỬA: Tự động kiểm tra trạng thái chọn để giữ dấu tick xuyên trang
+ */
 function renderPage() {
-    const groupContainer = document.getElementById("group-container");
-    if (!groupContainer) return;
+    const container = document.getElementById("group-container");
+    if (!container) return;
+    container.innerHTML = "";
 
-    groupContainer.innerHTML = "";
-    groupContainer.scrollTop = 0; // Tự động cuộn lên đầu danh sách khi qua trang mới
-
-    allGroups.forEach(group => {
+    displayGroups.forEach(group => {
         const row = document.createElement("div");
-        row.className = "grid grid-cols-12 text-xs text-gray-600 px-2 py-3 items-center hover:bg-gray-50 transition w-full";
-        
+        row.className = "grid grid-cols-12 items-center text-sm text-gray-700 px-2 py-3 hover:bg-gray-50 transition-colors";
+
+        // 🌟 BƯỚC QUAN TRỌNG: Kiểm tra xem group này ĐÃ TỒN TẠI trong mảng selectedGroups hay chưa
+        const isChecked = selectedGroups.some(g => g.group_id === group.group_id);
+
+        // Chèn thuộc tính ${isChecked ? "checked" : ""} vào thẻ input
         row.innerHTML = `
             <div class="col-span-6 min-w-0">
                 <div class="flex items-start gap-3">
-                    <div class="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600 flex-shrink-0">
-                        <i class="fa-solid fa-users"></i>
+                    <div class="flex items-center h-10 flex-shrink-0">
+                        <input 
+                            type="checkbox" 
+                            value="${group.group_id}"
+                            class="group-checkbox w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 focus:ring-2 cursor-pointer"
+                            ${isChecked ? "checked" : ""} 
+                            data-id="${group.group_id}"
+                        >
                     </div>
+                    
                     <div class="flex-1 min-w-0">
                         <a href="${group.group_url}" target="_blank" class="font-semibold text-gray-800 hover:text-blue-600 block truncate">
                             ${group.group_name}
@@ -172,11 +132,212 @@ function renderPage() {
                 </button>
             </div>
         `;
-        groupContainer.appendChild(row);
+
+        // Gắn sự kiện thay đổi trạng thái cho checkbox
+        const checkbox = row.querySelector(".group-checkbox");
+        checkbox.addEventListener("change", (e) => {
+            handleCheckboxChange(group, e.target.checked);
+        });
+
+        container.appendChild(row);
     });
 
-    renderPagination();
+    // 🌟 ĐẶT Ở ĐÂY: Sau khi toàn bộ các hàng của trang mới đã được vẽ xong
+    updateMasterCheckboxState();
 }
+
+/**
+ * Xử lý logic Thêm/Xóa group khỏi SelectedList khi click checkbox
+ */
+function handleCheckboxChange(group, isChecked) {
+    if (isChecked) {
+        // Nếu chưa có trong list thì push vào
+        if (!selectedGroups.some(g => g.group_id === group.group_id)) {
+            selectedGroups.push(group);
+        }
+    } else {
+        // Nếu uncheck thì lọc bỏ ra khỏi list
+        selectedGroups = selectedGroups.filter(g => g.group_id !== group.group_id);
+    }
+    
+    // Cập nhật lại UI của danh sách đã chọn bên ngoài
+    renderSelectedList();
+}
+
+
+/**
+ * Hàm render danh sách các Group đã chọn lên trên cùng (bên ngoài container)
+ * Đã cấu hình rút ngắn tên nhóm để giao diện gọn gàng
+ */
+function renderSelectedList() {
+    const selectedContainer = document.getElementById("selected-container");
+    const selectedCountEl = document.getElementById("selected-count");
+    if (!selectedContainer) return;
+
+    // Cập nhật số lượng hiển thị cạnh checkbox tổng
+    if (selectedCountEl) {
+        selectedCountEl.textContent = selectedGroups.length;
+    }
+
+    selectedContainer.innerHTML = "";
+
+    // MẶC ĐỊNH: Nếu không chọn gì -> Hiện "Mặc định: ALL"
+    if (selectedGroups.length === 0) {
+        selectedContainer.innerHTML = `
+            <div class="text-xs text-gray-500 bg-gray-100 px-2.5 py-1.5 rounded-md inline-block font-medium italic">
+                🌍 Mặc định: Chọn tất cả (ALL)
+            </div>
+        `;
+        return;
+    }
+
+    // Nếu có chọn, sinh ra các Badge kèm nút hủy nhanh (x)
+    const listWrapper = document.createElement("div");
+    listWrapper.className = "flex flex-wrap gap-1.5 items-center";
+    
+    // Tạo text tiêu đề "Đã chọn (X):" cho giống ảnh của bạn
+    const titleSpan = document.createElement("span");
+    titleSpan.className = "text-xs font-bold text-gray-700 mr-1";
+    titleSpan.textContent = `Đã chọn (${selectedGroups.length}):`;
+    listWrapper.appendChild(titleSpan);
+
+    selectedGroups.forEach(group => {
+        // 🌟 LOGIC RÚT NGẮN TÊN: Lấy tên thật, nếu quá 15 ký tự thì cắt ngắn + "..."
+        const rawName = group.group_name || `Nhóm ${group.group_id}`;
+        const maxLength = 15; 
+        const displayName = rawName.length > maxLength 
+            ? rawName.substring(0, maxLength) + "..." 
+            : rawName;
+
+        const badge = document.createElement("span");
+        // Thêm thuộc tính title để khi người dùng di chuột vào badge vẫn xem được đầy đủ tên nhóm gốc
+        badge.setAttribute("title", rawName);
+        badge.className = "inline-flex items-center gap-1 pl-2 pr-1 py-1 rounded-md text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-100 transition-all";
+        
+        badge.innerHTML = `
+            <span class="truncate select-none">${displayName}</span>
+            <button type="button" class="text-blue-400 hover:bg-blue-200 hover:text-blue-900 rounded-xs p-0.5 transition-colors flex-shrink-0 cursor-pointer">
+                <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+            </button>
+        `;
+
+        // Sự kiện click nút (x) để xóa nhanh trên Badge
+        badge.querySelector("button").addEventListener("click", () => {
+            selectedGroups = selectedGroups.filter(g => g.group_id !== group.group_id);
+            renderSelectedList();
+            renderPage(); // Vẽ lại trang hiện tại để đồng bộ bỏ tích checkbox
+            updateMasterCheckboxState();
+        });
+
+        listWrapper.appendChild(badge);
+    });
+
+    selectedContainer.appendChild(listWrapper);
+}
+
+/**
+ * Hàm phân trang giữ nguyên logic của bạn
+ */
+function renderPagination() {
+    const pagination = document.getElementById("pagination");
+    if (!pagination) return;
+    
+    pagination.innerHTML = "";
+    const totalPages = Math.ceil(totalGroupsCount / pageSize);
+    if (totalPages <= 1) return;
+
+    let pagesToShow = [];
+    const delta = 1; 
+
+    for (let i = 1; i <= totalPages; i++) {
+        if (i === 1 || i === totalPages || (i >= currentPage - delta && i <= currentPage + delta)) {
+            pagesToShow.push(i);
+        }
+    }
+
+    let lastPage = 0;
+    
+    pagesToShow.forEach(page => {
+        if (lastPage !== 0 && page - lastPage > 1) {
+            const dots = document.createElement("span");
+            dots.textContent = "...";
+            dots.className = "px-3 py-1 text-gray-400 mx-1 align-middle select-none";
+            pagination.appendChild(dots);
+        }
+
+        const btn = document.createElement("button");
+        btn.setAttribute("type", "button");
+        btn.textContent = page;
+        btn.className = page === currentPage
+            ? "px-3 py-1 bg-blue-500 text-white rounded font-medium mx-1 cursor-pointer shadow-xs transition"
+            : "px-3 py-1 border border-gray-200 rounded text-gray-600 hover:bg-gray-50 mx-1 cursor-pointer transition";
+
+        btn.addEventListener("click", (e) => {
+            e.preventDefault();
+
+            loadGroups(currentUsername, currentUid, page);
+        });
+
+        pagination.appendChild(btn);
+        lastPage = page;
+    });
+}
+
+/**
+ * Hàm tự động bật/tắt Checkbox Tổng dựa trên các item của trang hiện tại
+ */
+function updateMasterCheckboxState() {
+    const masterCheckbox = document.getElementById("master-checkbox");
+    if (!masterCheckbox) return;
+
+    // Nếu trang hiện tại không có dữ liệu, mặc định bỏ check
+    if (displayGroups.length === 0) {
+        masterCheckbox.checked = false;
+        return;
+    }
+
+    // KIỂM TRA: Liệu TẤT CẢ các item của trang hiện tại đã nằm trong mảng selectedGroups chưa?
+    const isAllCurrentPageSelected = displayGroups.every(group => 
+        selectedGroups.some(g => g.group_id === group.group_id)
+    );
+
+    // Nếu đúng là toàn bộ trang đã được chọn -> Tích ô Master, ngược lại thì bỏ tích
+    masterCheckbox.checked = isAllCurrentPageSelected;
+}
+
+// Chạy khởi tạo danh sách rỗng ban đầu (Hiện chữ Mặc định: ALL)
+document.addEventListener("DOMContentLoaded", () => {
+    renderSelectedList();
+
+    const masterCheckbox = document.getElementById("master-checkbox");
+    if (masterCheckbox) {
+        masterCheckbox.addEventListener("change", (e) => {
+            const isChecked = e.target.checked;
+
+            if (isChecked) {
+                // HÀNH ĐỘNG: CHỌN HẾT TRANG HIỆN TẠI
+                displayGroups.forEach(group => {
+                    // Nếu group này chưa có trong danh sách tổng thì mới push vào
+                    if (!selectedGroups.some(g => g.group_id === group.group_id)) {
+                        selectedGroups.push(group);
+                    }
+                });
+            } else {
+                // HÀNH ĐỘNG: BỎ CHỌN HẾT TRANG HIỆN TẠI
+                // Chỉ lọc bỏ các group có group_id nằm trong trang hiện tại
+                selectedGroups = selectedGroups.filter(g => 
+                    !displayGroups.some(dg => dg.group_id === g.group_id)
+                );
+            }
+
+            // Cập nhật lại giao diện
+            renderSelectedList(); // Vẽ lại danh sách badge phía trên + cập nhật counter
+            renderPage();         // Tích hoặc hủy tích các checkbox hàng dưới
+        });
+    }
+});
 
 export function renderEmptyState() {
     const groupContainer = document.getElementById("group-container");
@@ -197,7 +358,7 @@ export function renderEmptyState() {
 
 export async function loadActiveAccounts() {
     try {
-        const response = await fetchWithAuth("/api/active-accounts");
+        const response = await fetchWithAuth("/api/v1/active-accounts");
         const data = await response.json();
 
         if (!selectUid) return;
@@ -221,76 +382,3 @@ export async function loadActiveAccounts() {
     }
 }
 
-/**
- * Hàm gửi toàn bộ danh sách groups hiện tại lên Backend
- */
-export async function sendGroupsToServer() {
-    // 1. Kiểm tra xem bộ nhớ đệm hiện tại có group nào không
-    if (!allGroups || allGroups.length === 0) {
-        alert("Danh sách nhóm hiện tại đang trống, không thể gửi!");
-        return;
-    }
-
-    try {
-        console.log("Đang gửi danh sách groups lên server...", allGroups);
-
-        // 2. Gọi API POST truyền mảng allGroups qua Body dạng JSON
-        const response = await fetchWithAuth('/api/groups/process', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(allGroups) // Chuyển mảng Object thành chuỗi JSON body
-        });
-
-        if (!response.ok) {
-            throw new Error(`Server báo lỗi: ${response.status}`);
-        }
-
-        const result = await response.json();
-        console.log("Kết quả từ server:", result);
-        alert(`Thành công: ${result.message}`);
-
-    } catch (err) {
-        console.error("Lỗi khi truyền danh sách groups lên endpoint:", err);
-        alert("Có lỗi xảy ra khi gửi dữ liệu lên server!");
-    }
-}
-
-// Biến cờ hiệu để tránh việc "đá nhau" nếu mạng chậm (API trước chưa xong mà 5s sau đã gọi tiếp)
-let isSyncing = false;
-
-/**
- * Hàm tự động gửi allGroups lên backend mỗi 5 giây (Không cần nút bấm)
- */
-export async function autoSyncGroupsToServer() {
-    // Nếu danh sách trống hoặc đang có một tiến trình gửi khác đang chạy thì bỏ qua
-    if (!allGroups || allGroups.length === 0 || isSyncing) {
-        return; 
-    }
-
-    try {
-        isSyncing = true; // Khóa lại để không cho lượt 5s kế tiếp chạy đè lên
-        console.log("🔄 [Auto-Sync] Đang tự động gửi danh sách groups lên server...", allGroups);
-
-        const response = await fetchWithAuth('/api/groups/process', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(allGroups) // Truyền thẳng mảng allGroups global của bạn
-        });
-
-        if (!response.ok) {
-            throw new Error(`Server báo lỗi: ${response.status}`);
-        }
-
-        const result = await response.json();
-        console.log("✅ [Auto-Sync] Đồng bộ thành công:", result);
-
-    } catch (err) {
-        console.error("❌ [Auto-Sync] Lỗi đồng bộ tự động:", err);
-    } finally {
-        isSyncing = false; // Mở khóa để lượt 5s tiếp theo có thể chạy tiếp
-    }
-}

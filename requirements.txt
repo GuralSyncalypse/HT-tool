@@ -6,6 +6,8 @@ regex
 requests
 uvicorn
 sqlmodel
+sqlalchemy
 psycopg2-binary
 pwdlib[bcrypt]
 pyjwt[crypto]
+pyperclip

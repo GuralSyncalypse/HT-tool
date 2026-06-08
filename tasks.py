@@ -23,6 +23,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.remote.file_detector import LocalFileDetector
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -60,7 +61,13 @@ class FacebookBot:
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--window-size=1920,1080")
-        chrome_options.add_argument(f"--user-agent={self.user_agent}")
+
+        # Chỉ add user-agent nếu nó hợp lệ
+        if self.user_agent:
+            chrome_options.add_argument(f"--user-agent={self.user_agent}")
+        else:
+            # Hoặc định nghĩa một UA mặc định sạch sẽ
+            chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         
         self.driver = webdriver.Remote(
             command_executor=self.remote_url,
@@ -131,6 +138,34 @@ class FacebookBot:
         except Exception as e:
             print(f"[UID: {uid}] Gặp lỗi trong quá trình inject cookie: {e}")
             self.close() # Đóng driver ngay nếu lỗi giữa chừng
+            return False
+
+    # Giả lập hành vi con người
+    def human_type_direct(self, editor_element, content: str):
+        """
+        Giả lập gõ phím như người thật trực tiếp vào phần tử được truyền vào.  
+            :param driver: Biến driver của Selenium (để dùng ActionChains)
+            :param editor_element: Phần tử WebElement (chính là biến editor của bạn)
+            :param content: Nội dung văn bản cần gõ
+        """
+        try:
+            # 1. Click vào phần tử để focus
+            actions = ActionChains(self.driver)
+            actions.move_to_element(editor_element).click().perform()
+            time.sleep(random.uniform(0.5, 1.0))
+            
+            # 2. Giả lập gõ từng phím
+            print(f"Bắt đầu gõ trực tiếp: {content[:30]}...")
+            for character in content:
+                editor_element.send_keys(character)
+                time.sleep(random.uniform(0.05, 0.25))
+                
+            print("Hoàn tất giả lập gõ nội dung.")
+            time.sleep(random.uniform(0.8, 1.5))
+            return True
+            
+        except Exception as e:
+            print(f"Có lỗi xảy ra khi gõ chữ: {e}")
             return False
 
     def send_message_via_uid(self, uid, content):
@@ -385,15 +420,21 @@ class FacebookBot:
         print(f"🎉 Đã lọc và trích xuất thành công {len(joined_groups)} nhóm đã tham gia.")
         return joined_groups
 
-    def create_post(self, content="", img_paths=[]):
+    def create_post(self, id, content="", img_paths=[]):
+        self.driver.get(f"https://www.facebook.com/{id}")
         post_box_xpath = "//span[contains(text(),'mind') or contains(text(),'nghĩ gì') or contains(text(),'something') or contains(text(),'viết gì')]"
 
-        post_box = self.driver.find_element(By.XPATH, post_box_xpath)
-        post_box.click()
-
+        try:
+            post_box = WebDriverWait(self.driver, 5).until( # Tăng lên 5s cho an toàn mạng
+                EC.element_to_be_clickable((By.XPATH, post_box_xpath))
+            )
+            post_box.click()
+        except:
+            return False
         print("Đã mở hộp đăng bài")
 
-        time.sleep(2)
+        # Giả lập: Nghỉ ngẫu nhiên, không lần nào giống lần nào để qua mặt AI Facebook
+        time.sleep(random.uniform(1.2, 2.5))
 
         composer = WebDriverWait(self.driver, 10).until(
             EC.presence_of_element_located(
@@ -409,24 +450,62 @@ class FacebookBot:
             ".//div[@role='textbox']"
         )
 
-        # 1. Tìm element cần điền
-
         editor.click()
-        self.driver.execute_script("""
-            var element = arguments[0];
-            var text = arguments[1];
-            
-            // 1. Gán text (bao gồm cả Emoji) vào thẻ div
-            element.innerText = text;
-            
-            // 2. Kích hoạt liên tiếp các sự kiện để React/Vue/Angular cập nhật State
-            element.dispatchEvent(new Event('focus', { bubbles: true }));
-            element.dispatchEvent(new Event('input', { bubbles: true }));
-            element.dispatchEvent(new Event('change', { bubbles: true }));
-            element.dispatchEvent(new Event('blur', { bubbles: true }));
-        """, editor, content)
+        time.sleep(random.uniform(0.5, 1.0))
 
-        print("Đã nhập nội dung")
+        print("🚀 Đang tiến hành gõ cụm thông minh kết hợp xử lý Emoji...")
+
+        # Biểu thức chính quy (Regex) để tách văn bản thành mảng gồm các cụm chữ và các icon riêng biệt
+        # Nó sẽ tách chuỗi kiểu: "Hello 🌍 mọi người 😍" thành ['Hello ', '🌍', ' mọi người ', '😍']
+        tokens = re.split(r'([\U00010000-\U0010FFFF])', content)
+
+        for token in tokens:
+            if not token:
+                continue
+            
+            # TRƯỜNG HỢP 1: Nếu token là một Emoji (Ký tự nằm ngoài vùng BMP)
+            if re.match(r'[\U00010000-\U0010FFFF]', token):
+                # Dùng Javascript để chèn icon vào cuối nội dung hiện tại của thẻ div editor
+                self.driver.execute_script("""
+                    var element = arguments[0];
+                    var emoji = arguments[1];
+                    
+                    // Chèn emoji vào thẻ div editable
+                    element.focus();
+                    document.execCommand('insertText', false, emoji);
+                    
+                    // Kích hoạt sự kiện để Facebook cập nhật trạng thái
+                    element.dispatchEvent(new Event('input', { bubbles: true }));
+                """, editor, token)
+                time.sleep(random.uniform(0.1, 0.3)) # Nghỉ một chút sau khi chèn icon
+                
+            # TRƯỜNG HỢP 2: Nếu là chữ viết thông thường
+            else:
+                # Tách chữ thường thành các cụm nhỏ hơn nữa (tầm 15 ký tự) để gõ nhanh
+                chunk_size = 15
+                chunks = [token[i:i+chunk_size] for i in range(0, len(token), chunk_size)]
+                
+                for chunk in chunks:
+                    editor.send_keys(chunk)
+                    time.sleep(random.uniform(0.05, 0.15)) # Tốc độ gõ cụm chữ nhanh
+
+        time.sleep(random.uniform(1.0, 2.0))
+        print("✅ Đã gõ xong toàn bộ văn bản và Emoji không một lỗi vết!")
+
+        # BOT
+        # self.driver.execute_script("""
+        #     var element = arguments[0];
+        #     var text = arguments[1];
+            
+        #     // 1. Gán text (bao gồm cả Emoji) vào thẻ div
+        #     element.innerText = text;
+            
+        #     // 2. Kích hoạt liên tiếp các sự kiện để React/Vue/Angular cập nhật State
+        #     element.dispatchEvent(new Event('focus', { bubbles: true }));
+        #     element.dispatchEvent(new Event('input', { bubbles: true }));
+        #     element.dispatchEvent(new Event('change', { bubbles: true }));
+        #     element.dispatchEvent(new Event('blur', { bubbles: true }));
+        # """, editor, content)
 
         # Thêm ảnh
         if not img_paths:
@@ -442,57 +521,39 @@ class FacebookBot:
         for img_path in img_paths:
             file_name = img_path.split('\\')[-1]
             file_path = os.path.join(BASE_DIR, "bot_media_tmp", file_name)
-
-
-            print(file_path)
             file_input.send_keys(file_path)
+            # Nghỉ một chút giữa mỗi lần nạp file ảnh tiếp theo
+            time.sleep(random.uniform(1.0, 2.0))
 
-        
-        time.sleep(1)
-        #
+        print("Đã nạp toàn bộ ảnh, chờ Facebook xử lý render...")
+
+        # Giả lập: Đợi cho đến khi nút Post thực sự "Bấm được" (Hết trạng thái disabled của FB)
+        post_btn = WebDriverWait(composer, 15).until(
+            EC.element_to_be_clickable((By.XPATH, ".//div[@aria-label='Post']"))
+        )
+
+        # Di chuột mồi đến nút trước khi click (Sử dụng ActionChains nếu cần thiết)
+        time.sleep(random.uniform(0.7, 1.5)) 
+
+        # post_btn.click()
+        print("Đã đăng bài!")
+
+        # Nút đăng bài
         post_btn = composer.find_element(
             By.XPATH,
             ".//div[@aria-label='Post']"
         )
 
         #post_btn.click()
-        print("Đã đăng bài!")
 
+        actions = ActionChains(self.driver)
+        actions.move_to_element(post_btn).perform() # Rê chuột đến ô đăng bài
+        time.sleep(random.uniform(0.3, 0.7))        # Giữ chuột ở đó một tí
+        actions.click(post_btn).perform()                   # Bấm chuột
+        
+        print("Hoàn tất đăng bài")
+        return True
 
-    def run_actions(self, uid: str, content="", img_paths=[]):
-        """Hàm chứa các kịch bản hành động của bot sau khi đã login thành công"""
-        if not self.driver:
-            print(f"[UID: {uid}] Trình duyệt chưa được khởi tạo!")
-            return
-            
-        try:
-            print(f"[UID: {uid}] Đang thực hiện các tác vụ của bot...")
-            # Ví dụ các hành động của bạn:
-            
-            # data = []
-            # for uid in uids:
-            #     success = self.send_message_via_uid(uid, "Hello!")
-            #     data.append([uid, success])
-            
-            # groups = self.scrape_joined_groups()
-            # print(groups)
-            # try:
-            #     redis_conn.set(f"groups:{uid}", json.dumps(groups))
-            #     print(f"🚀 [Worker] Đã lưu thẳng {len(groups)} group vào Redis cho UID {uid}!")
-            # except Exception as redis_err:
-            #     print(f"❌ Lỗi ghi Redis từ Worker: {redis_err}")
-
-            self.driver.get('https://www.facebook.com/groups/502928924130697')
-            self.create_post(content, img_paths)
-
-            self.driver.get('https://www.facebook.com/groups/quantanbin')
-            self.create_post(content, img_paths)
-
-            time.sleep(5) # Giả lập thời gian bot làm việc
-            # create_excel_file(data, ['uid', 'success'], 'app/output', 'result.xlsx')
-            
-        except Exception as e:
-            print(f"[UID: {uid}] Lỗi khi chạy tác vụ: {e}")
 
     def close(self):
         """Đóng trình duyệt giải phóng RAM"""
@@ -639,12 +700,16 @@ def run_selenium_scan_group(data: dict):
 
 def run_selenium_task(data: dict):
     uid = data.get("uid")
-    action = data.get("action")
-    imgs_path = data.get("image_paths", [])
+    username = data.get("username")
 
+    group_ids = data.get("group_ids")
+    content = data.get("content")
+    img_paths = data.get("image_paths", [])
+    
     # 1. Khởi tạo Bot và cấu hình
     bot = FacebookBot()
     bot.user_agent = data.get("user_agent", "")
+
 
     try:
         # 2. Đăng nhập
@@ -653,7 +718,9 @@ def run_selenium_task(data: dict):
             return {"status": "failed", "reason": "auth_failed", "uid": uid}
 
         # 3. Điều phối tác vụ (Rẽ nhánh gọi hàm riêng biệt)
-        execute_action_routing(bot, action, data)
+        for group_id in group_ids:
+            print(f"Thao tác id {group_id}")
+            bot.create_post(group_id, content, img_paths)
 
         return {"status": "completed", "uid": uid}
 
@@ -662,9 +729,8 @@ def run_selenium_task(data: dict):
         return {"status": "error", "message": str(e), "uid": uid}
 
     finally:
-        # 4. Giải phóng tài nguyên (Bắt buộc)
         bot.close()
-        clean_temporary_images(imgs_path, uid)
+        clean_temporary_images(img_paths, uid)
 
 def clean_temporary_images(imgs_path: list, uid: str):
     """Hàm chuyên trách dọn dẹp các file ảnh tạm trên đĩa cứng"""
@@ -680,29 +746,3 @@ def clean_temporary_images(imgs_path: list, uid: str):
         except Exception as e:
             # Chỉ log lại lỗi chứ không hoãn tiến trình (không raise error ở đây)
             print(f"-> Không thể xóa file {path}. Lỗi: {str(e)}")
-
-
-def execute_action_routing(bot: FacebookBot, action: str, data: dict):
-    """Hàm chuyên trách việc đọc action và phân phối công việc cho Bot"""
-    uid = data.get("uid")
-    content = data.get("text_content", "")
-    imgs_path = data.get("image_paths", [])
-
-    print(f"[Task {uid}] Đang xử lý action: '{action}'")
-
-    if action == "update-group":
-        groups = bot.scrape_joined_groups()
-        print(groups)
-        try:
-            redis_conn.set(f"groups:{uid}", json.dumps(groups))
-            print(f"🚀 [Worker] Đã lưu thẳng {len(groups)} group vào Redis cho UID {uid}!")
-        except Exception as redis_err:
-            print(f"❌ Lỗi ghi Redis từ Worker: {redis_err}")
-        
-        
-    elif action == "comment_spam":
-        target_urls = data.get("target_urls", [])
-        bot.comment_to_targets(target_urls, content)
-        
-    else:
-        raise ValueError(f"Action '{action}' không hợp lệ hoặc chưa được hỗ trợ.")

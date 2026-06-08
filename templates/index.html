@@ -96,10 +96,10 @@
                                 
                                 <i class="fa-solid fa-gear hover:text-blue-500 cursor-pointer"></i>
                             </div>
-                            <button class="flex items-center space-x-1 border border-gray-300 rounded-full px-3 py-1 text-xs text-gray-500 hover:bg-gray-50 cursor-pointer">
+                            <!-- <button class="flex items-center space-x-1 border border-gray-300 rounded-full px-3 py-1 text-xs text-gray-500 hover:bg-gray-50 cursor-pointer">
                                 <i class="fa-solid fa-wand-magic-sparkles text-purple-500"></i>
                                 <span>AI viết lại</span>
-                            </button>
+                            </button> -->
                         </div>
                     </div>
 
@@ -184,63 +184,71 @@
                     </div>
                 </div>
 
-                <div class="border border-gray-200 rounded-2xl p-4 flex flex-col h-[600px]">
+                <div class="border border-gray-200 rounded-2xl p-4 flex flex-col h-[650px] bg-white shadow-xs">
                     
-                    <div class="flex items-center justify-between gap-2 mb-6">
+                    <div class="flex items-center justify-between gap-2 mb-4">
                         <div class="flex items-center space-x-3 flex-1 max-w-md">
-                            <input type="checkbox" class="w-4 h-4 rounded-sm border-gray-300 text-blue-600 focus:ring-blue-500">
-                            <span class="text-sm font-bold text-gray-700">0</span>
+                            <input type="checkbox" id="master-checkbox" class="w-4 h-4 rounded-xs border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer">
+                            
+                            <span id="selected-count" class="text-sm font-bold text-gray-700 min-w-[12px]">0</span>
+                            
                             <div class="relative flex-1">
                                 <span class="absolute inset-y-0 left-3 flex items-center text-gray-400">
                                     <i class="fa-solid fa-magnifying-glass"></i>
                                 </span>
-                                <input type="text" placeholder="Tìm kiếm" class="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-1.5 text-sm outline-hidden focus:border-blue-400">
+                                <input type="text" id="search-groups" placeholder="Tìm kiếm nhóm..." class="w-full border border-gray-200 rounded-lg pl-9 pr-3 py-1.5 text-sm outline-hidden focus:border-blue-400 transition-colors">
                             </div>
                         </div>
                         
                         <div class="flex space-x-2">
-                            <button class="px-4 py-1.5 border border-gray-300 text-gray-700 font-medium text-xs rounded-md hover:bg-gray-50 cursor-pointer">Lưu</button>
-                            <button class="px-3 py-1.5 border border-gray-300 text-gray-700 font-medium text-xs rounded-md hover:bg-gray-50 cursor-pointer">Xuất nhóm</button>
-                            <button id="btn-update-group" class="px-3 py-1.5 border border-gray-300 text-gray-700 font-medium text-xs rounded-md hover:bg-gray-50 cursor-pointer">Cập nhật</button>
+                            <button type="button" class="px-4 py-1.5 border border-gray-300 text-gray-700 font-medium text-xs rounded-md hover:bg-gray-50 cursor-pointer transition">Lưu</button>
+                            <button type="button" class="px-3 py-1.5 border border-gray-300 text-gray-700 font-medium text-xs rounded-md hover:bg-gray-50 cursor-pointer transition">Xuất nhóm</button>
+                            <button type="button" id="btn-update-group" class="px-3 py-1.5 border border-gray-300 text-gray-700 font-medium text-xs rounded-md hover:bg-gray-50 cursor-pointer transition">Cập nhật</button>
                         </div>
                     </div>
 
-                    <div class="grid grid-cols-12 text-xs font-bold text-gray-800 px-2 pb-3 border-b border-gray-100">
+                    <div id="selected-container" class="mb-4 p-2.5 border border-dashed border-gray-200 rounded-xl bg-gray-50/50 max-h-[85px] overflow-y-auto">
+                        <div class="text-xs text-gray-500 italic px-1">
+                            🌍 Mặc định: Chọn tất cả (ALL)
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-12 text-xs font-bold text-gray-800 px-3 pb-3 border-b border-gray-100 select-none">
                         <div class="col-span-6">Tên nhóm</div>
-                        <div class="col-span-2 text-center flex items-center justify-center space-x-1 cursor-pointer select-none">
+                        <div class="col-span-2 text-center flex items-center justify-center space-x-1 cursor-pointer hover:text-gray-600 transition">
                             <span>Số TV</span> <i class="fa-solid fa-arrows-up-down text-[10px] text-gray-400"></i>
                         </div>
-                        <div class="col-span-2 text-center flex items-center justify-center space-x-1 cursor-pointer select-none">
+                        <div class="col-span-2 text-center flex items-center justify-center space-x-1 cursor-pointer hover:text-gray-600 transition">
                             <span>Bài/ngày</span> <i class="fa-solid fa-arrows-up-down text-[10px] text-gray-400"></i>
                         </div>
-                        <div class="col-span-1 text-center flex items-center justify-center space-x-1 cursor-pointer select-none">
+                        <div class="col-span-1 text-center flex items-center justify-center space-x-1 cursor-pointer hover:text-gray-600 transition">
                             <span>TV mới</span> <i class="fa-solid fa-arrows-up-down text-[10px] text-gray-400"></i>
                         </div>
-                        <div class="col-span-1 text-center flex items-center justify-center space-x-1 cursor-pointer select-none">
+                        <div class="col-span-1 text-center flex items-center justify-center space-x-1 cursor-pointer hover:text-gray-600 transition">
                             <span>Duyệt bài</span> <i class="fa-solid fa-arrows-up-down text-[10px] text-gray-400"></i>
                         </div>
                     </div>
 
-                    <div id="group-container" class="flex-1 min-h-0 overflow-y-auto divide-y divide-gray-100 w-full">
-                        <div class="flex flex-col items-center justify-center py-12">
-                            <div class="w-32 h-32 bg-gray-50 rounded-full flex items-center justify-center relative mb-4">
-                                <div class="w-20 h-16 border-2 border-gray-200 bg-white rounded-lg shadow-sm p-2 flex flex-col space-y-1">
+                    <div id="group-container" class="flex-1 min-h-0 overflow-y-auto divide-y divide-gray-100 w-full pr-1">
+                        <div class="flex flex-col items-center justify-center py-16">
+                            <div class="w-28 h-28 bg-gray-50 rounded-full flex items-center justify-center relative mb-4">
+                                <div class="w-16 h-14 border-2 border-gray-200 bg-white rounded-lg shadow-2xs p-2 flex flex-col space-y-1">
                                     <div class="flex space-x-1 mb-1">
-                                        <div class="w-1.5 h-1.5 bg-gray-300 rounded-full"></div>
-                                        <div class="w-1.5 h-1.5 bg-gray-300 rounded-full"></div>
-                                        <div class="w-1.5 h-1.5 bg-gray-300 rounded-full"></div>
+                                        <div class="w-1 h-1 bg-gray-300 rounded-full"></div>
+                                        <div class="w-1 h-1 bg-gray-300 rounded-full"></div>
+                                        <div class="w-1 h-1 bg-gray-300 rounded-full"></div>
                                     </div>
-                                    <div class="w-full h-2 bg-gray-100 rounded-xs"></div>
-                                    <div class="w-3/4 h-2 bg-gray-100 rounded-xs"></div>
+                                    <div class="w-full h-1.5 bg-gray-100 rounded-xs"></div>
+                                    <div class="w-3/4 h-1.5 bg-gray-100 rounded-xs"></div>
                                 </div>
-                                <div class="absolute bottom-4 right-4 w-10 h-10 bg-gray-300/40 rounded-sm"></div>
+                                <div class="absolute bottom-4 right-4 w-8 h-8 bg-gray-300/30 rounded-sm"></div>
                             </div>
-                            <span class="text-sm font-bold text-gray-800">Không tìm thấy nhóm</span>
+                            <span class="text-sm font-semibold text-gray-500">Không tìm thấy dữ liệu nhóm</span>
                         </div>
                     </div>
 
-                    <div id="pagination" class="mt-auto flex justify-center gap-2 pt-4 border-t border-gray-100 bg-white pb-2">
-                    </div>
+                    <div id="pagination" class="mt-auto flex justify-center gap-2 pt-4 border-t border-gray-100 bg-white pb-1 select-none">
+                        </div>
 
                 </div>
             </div>  

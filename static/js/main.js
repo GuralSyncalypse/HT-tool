@@ -1,5 +1,5 @@
 // main.js
-import { loadActiveAccounts, loadGroups, autoSyncGroupsToServer } from "./groups.js";
+import { loadActiveAccounts, loadGroups } from "./groups.js";
 import { initImageUploader } from "./imageUploader.js"; 
 import { initPostButton, initUpdateGroupButton } from "./bot.js"; 
 
@@ -52,7 +52,7 @@ document.addEventListener("DOMContentLoaded", async () => {
         if (userZone) userZone.classList.remove('hidden');
         
         try {
-            const res = await fetchWithAuth('/users/me');
+            const res = await fetchWithAuth('/api/v1/users/me');
             const data = await res.json();
             
             if (data && data.username) {
@@ -106,7 +106,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     if (logoutBtn) {
         logoutBtn.addEventListener('click', async () => {
             try {
-                await fetchWithAuth('/logout', { method: 'POST' });
+                await fetchWithAuth('/api/v1/logout', { method: 'POST' });
             } catch (err) {
                 console.error("Lỗi gọi API logout:", err);
             } finally {
