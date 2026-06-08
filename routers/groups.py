@@ -30,7 +30,7 @@ def process_user_groups(groups: List[GroupDetail]):
 @router.get("/active-accounts")
 def get_active_accounts():
     cookie_keys = redis_client.keys("cookies:*")
-    uids = [key.split(":")[1] for key in cookie_keys]
+    uids = [key.decode('utf-8').split(":")[1] for key in cookie_keys]
     return {"uids": uids}
 
 @router.post("/cookies")

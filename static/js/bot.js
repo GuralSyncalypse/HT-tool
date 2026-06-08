@@ -4,6 +4,7 @@ const startBtn = document.getElementById("btn-start")
 const botStatus = document.getElementById("bot-status");
 const selectUid = document.getElementById("select-uid");
 
+
 // export function initBotButton() {
 
 //     runBotBtn.addEventListener("click", async () => {
@@ -57,52 +58,103 @@ const selectUid = document.getElementById("select-uid");
 //     });
 // }
 
+// Hàm phụ: Tự động chạy ngầm đi hỏi thăm trạng thái của Job ID
+async function checkUpdateJobStatus(jobId) {
+    try {
+        const response = await fetch(`/api/v1/bot/check-job/${jobId}`);
+        if (!response.ok) return "failed";
+        const result = await response.json();
+        return result.status;
+    } catch (error) {
+        console.error("Lỗi kết nối check job:", error);
+        return "failed";
+    }
+}
+
+// Hàm phụ trách chạy vòng lặp Polling (Tách riêng ra để tái sử dụng)
+async function startPolling(btnUpdate, originalText, jobId) {
+    let isDone = false;
+    
+    // Bật hiệu ứng quay và khóa nút
+    btnUpdate.disabled = true;
+    btnUpdate.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Đang xử lý ngầm...`;
+
+    while (!isDone) {
+        await new Promise(resolve => setTimeout(resolve, 2000)); 
+        const status = await checkUpdateJobStatus(jobId);
+        
+        if (status === "completed") {
+            alert("Bot đã quét và cập nhật nhóm thành công! 🎉");
+            isDone = true;
+            localStorage.removeItem("current_scan_job_id"); // Xóa ID khi xong
+        } else if (status === "failed") {
+            alert("Tác vụ quét nhóm ngầm bị lỗi hoặc đã thất bại! ❌");
+            isDone = true;
+            localStorage.removeItem("current_scan_job_id"); // Xóa ID khi lỗi
+        }
+        // Nếu "pending" hoặc "processing", vòng lặp tiếp tục chạy...
+    }
+
+    // Tắt hiệu ứng quay, trả nút về ban đầu
+    btnUpdate.disabled = false;
+    btnUpdate.innerHTML = originalText;
+}
+
 export function initUpdateGroupButton() {
     const btnUpdate = document.getElementById("btn-update-group");
-    
-    // Kiểm tra xem nút có tồn tại trên giao diện không trước khi gán sự kiện
     if (!btnUpdate) return; 
 
+    const originalText = btnUpdate.innerHTML;
+
+    // 🌟 LOGIC QUAN TRỌNG: Kiểm tra ngay khi vừa load/reset lại trang
+    const savedJobId = localStorage.getItem("current_scan_job_id");
+    if (savedJobId) {
+        // Nếu tìm thấy job_id cũ chưa chạy xong, tự động kích hoạt lại vòng lặp quay nút
+        startPolling(btnUpdate, originalText, savedJobId);
+    }
+
     btnUpdate.addEventListener("click", async function() {
-        // 1. Lấy đúng phần tử select-uid từ DOM
         const selectUidElement = document.getElementById("select-uid");
-        if (!selectUidElement) {
-            alert("Không tìm thấy phần tử chọn UID trên giao diện!");
-            return;
-        }
+        if (!selectUidElement) { alert("Không tìm thấy UID trên UI!"); return; }
 
         const uid = selectUidElement.value; 
-
-        if (!uid) {
-            alert("Không tìm thấy UID cần cập nhật!");
-            return;
-        }
+        if (!uid) { alert("Không tìm thấy UID cần cập nhật!"); return; }
 
         const usernameElement = document.getElementById("user-display-name");
         const username = usernameElement ? usernameElement.innerText.trim() : "";
 
-        // 2. Tạo FormData để gửi lên API dạng Form(...)
         const formData = new FormData();
         formData.append("uid", uid);
-        formData.append("username", username)
+        formData.append("username", username);
 
         try {
-            // Thay đổi URL cho đúng với domain/port của project bạn
+            // Tạm thời khóa nút nhanh để tránh double click
+            btnUpdate.disabled = true;
+            btnUpdate.innerHTML = `<i class="fas fa-spinner fa-spin"></i> Đang khởi tạo...`;
+
             const response = await fetch("/api/v1/bot/scan-group", {
                 method: "POST",
-                body: formData // Không cần set Headers "Content-Type"
+                body: formData
             });
 
             const result = await response.json();
 
-            if (response.ok) {
-                alert(`Đã thêm tác vụ cập nhật vào hàng đợi! Job ID: ${result.job_id}`);
+            if (response.ok && result.job_id) {
+                // 🌟 Lưu job_id vào bộ nhớ trình duyệt trước khi chạy Polling
+                localStorage.setItem("current_scan_job_id", result.job_id);
+                
+                // Kích hoạt vòng lặp chờ backend
+                await startPolling(btnUpdate, originalText, result.job_id);
             } else {
                 alert(`Lỗi: ${result.detail || "Không thể chạy bot"}`);
+                btnUpdate.disabled = false;
+                btnUpdate.innerHTML = originalText;
             }
         } catch (error) {
             console.error("Lỗi kết nối:", error);
             alert("Không thể kết nối tới Server API!");
+            btnUpdate.disabled = false;
+            btnUpdate.innerHTML = originalText;
         }
     });
 }
@@ -112,13 +164,26 @@ import { getSelectedFiles, resetUploader } from "./imageUploader.js";
 import { selectedGroups } from "./groups.js";
 import { fetchWithAuth } from "./main.js";
 
+// Hàm phụ: Kiểm tra trạng thái của tác vụ Đăng bài ngầm
+async function checkJobStatus(jobId) {
+    try {
+        const response = await fetch(`/api/v1/bot/check-job/${jobId}`);
+        if (!response.ok) return "failed";
+        
+        const result = await response.json();
+        return result.status; // Trả về: "pending" | "processing" | "completed" | "failed"
+    } catch (error) {
+        console.error("Lỗi khi kết nối kiểm tra trạng thái đăng bài:", error);
+        return "failed";
+    }
+}
+
 export function initPostButton() {
     const btnPost = document.getElementById("btn-start");
     if (!btnPost) return;
 
     btnPost.addEventListener("click", async () => {
         const uid = document.getElementById("select-uid")?.value;
-        // Lấy thêm username hiển thị trên UI để làm căn cứ khớp query cho Backend
         const usernameElement = document.getElementById("user-display-name"); 
         const username = usernameElement ? usernameElement.innerText.trim() : "";
         const content = document.getElementById("content-box")?.value || "";
@@ -126,50 +191,78 @@ export function initPostButton() {
 
         if (!uid || !username) { alert("Vui lòng chọn tài khoản hợp lệ!"); return; }
 
-
-        if (content == '') {
+        if (content === '') {
             alert("Vui lòng nhập nội dung!");
             return;
         }   
 
-        // 2. Khởi tạo FormData
         const formData = new FormData();
         formData.append("uid", uid);
         formData.append("username", username);
         formData.append("content", content);
 
-        // 🌟 3. LOGIC QUAN TRỌNG: Mặc định gửi "ALL", có chọn thì gửi mảng string JSON
         if (selectedGroups.length === 0) {
             formData.append("group_ids", "ALL");
         } else {
             formData.append("group_ids", JSON.stringify(selectedGroups));
         }
 
-        // Đính kèm danh sách file ảnh
         selectedFiles.forEach((file) => { formData.append("images", file); });
 
-        try {
-            btnPost.disabled = true;
-            btnPost.innerText = "Đang gửi...";
+        // --- BƯỚC 1: BẬT HIỆU ỨNG QUAY NÚT ---
+        const originalText = btnPost.innerHTML; // Lưu lại chữ gốc để khôi phục sau
+        btnPost.disabled = true;
+        btnPost.innerHTML = `<span class="spinner"></span> Đang đăng bài...`;
 
+        try {
+            // --- BƯỚC 2: GỬI LỆNH TẠO JOB ĐĂNG BÀI ---
             const response = await fetch("/api/v1/bot/post-by-group-ids", {
                 method: "POST",
-                body: formData // Trình duyệt tự sinh multipart/form-data
+                body: formData 
             });
 
-            if (response.ok) {
-                alert("Đã gửi tác vụ đăng bài lên Server thành công!");
-                // Clear nội dung content-box và ảnh preview tại đây...
-                document.getElementById("content-box").value = ''
-                resetUploader(btnPost, imagePreviewContainer)
-            } else {
-                alert("Gửi bài thất bại, vui lòng kiểm tra cấu hình.");
+            const result = await response.json();
+
+            if (response.ok && result.job_id) {
+                const jobId = result.job_id;
+                let isDone = false;
+
+                // --- BƯỚC 3: VÒNG LẶP HỎI THĂM TIẾN ĐỘ BACKEND ---
+                while (!isDone) {
+                    // Nghỉ 2 giây trước khi hỏi lần tiếp theo
+                    await new Promise(resolve => setTimeout(resolve, 2000)); 
+                    
+                    const status = await checkPostJobStatus(jobId);
+                    
+                    if (status === "completed") {
+                        alert("Bot đã hoàn tất đăng bài lên các nhóm thành công! 🎉");
+                        
+                        // Xóa sạch nội dung ô nhập và ảnh preview
+                        document.getElementById("content-box").value = '';
+                        if (typeof resetUploader === "function") {
+                            resetUploader(btnPost, imagePreviewContainer);
+                        }
+                        
+                        isDone = true; // Thoát vòng lặp
+                    } else if (status === "failed") {
+                        alert("Bot xử lý đăng bài thất bại hoặc hàng đợi bị hủy! ❌");
+                        isDone = true; // Thoát vòng lặp
+                    }
+                    // Nếu status là "pending" hay "processing", nút VẪN QUAY liên tục
+                }
             }
-        } catch (error) {
+            else {
+                alert(`Gửi bài thất bại: ${result.detail || "Vui lòng kiểm tra cấu hình."}`);
+            }
+        } 
+        catch (error) {
             console.error("Lỗi kết nối:", error);
-        } finally {
+            alert("Không thể kết nối tới Server API!");
+        } 
+        finally {
+            // --- BƯỚC 4: TẮT QUAY, MỞ KHÓA NÚT ---
             btnPost.disabled = false;
-            btnPost.innerText = "Đăng bài";
+            btnPost.innerHTML = originalText;
         }
     });
 }

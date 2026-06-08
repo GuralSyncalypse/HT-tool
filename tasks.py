@@ -642,6 +642,7 @@ def run_selenium_scan_group(data: dict):
             account = session.exec(statement).first()
             
             if not account:
+                # ✨ BƯỚC TẠO MỚI (Nếu chưa có account)
                 print(f"⚠️ UID {uid} chưa tồn tại. Tiến hành tạo mới...")
                 
                 # 1.1. Tìm User_id dựa vào username để gắn liên kết (Foreign Key)
@@ -650,45 +651,53 @@ def run_selenium_scan_group(data: dict):
                 
                 if not user:
                     print(f"❌ Không thể tạo SocialAccount vì không tìm thấy User chính có tên: {username}")
-                    # Dừng luồng xử lý của job này ở đây vì dữ liệu mồ côi, không biết của ai
+                    # Dừng luồng xử lý của job này ở đây vì dữ liệu mồ côi
                     return 
                     
                 # 1.2. Khởi tạo đối tượng SocialAccount mới tinh
                 account = SocialAccount(
                     uid=uid,
-                    username=username, # Tên của UID (nếu có)
+                    username=username, # Tên của UID
                     user_id=user.id,   # Gắn ID của User vừa tìm được
-                    groups_data=[]     # Mảng trống để tí nữa đổ dữ liệu vào
+                    groups_data=[]     # Mảng trống để tí nữa đổ dữ liệu vào ở bước dưới
                 )
                 session.add(account)
                 print(f"✨ Đã khởi tạo tài khoản mới cho UID {uid} thuộc User {username}")
 
-                # 2. Xử lý chống trùng lặp nhóm (Idempotency)
-                # Lấy danh sách ID các nhóm hiện tại đang có trong DB của UID này
-                existing_ids = {g.get("group_id") for g in account.groups_data if "group_id" in g}
-
-                # Lọc lấy những nhóm thực sự mới từ danh sách Worker vừa cào được
-                new_groups = [g for g in groups if g.get("group_id") not in existing_ids]
-
-                if new_groups:
-                    # 3. Nối thẳng danh sách nhóm mới vào mảng phẳng groups_data
-                    account.groups_data.extend(new_groups)
-                    account.updated_at = datetime.now(vnTZObject)
-                    
-                    # Ép SQLAlchemy nhận biết trường JSONB này đã bị thay đổi
-                    flag_modified(account, "groups_data")
-                    
-                    session.add(account)
-                    session.commit()
-                    print(f"🚀 [Worker] Đã cập nhật thêm {len(new_groups)} nhóm mới vào Postgres cho UID {uid}!")
-                else:
-                    print(f"ℹ️ [Worker] UID {uid}: Không tìm thấy nhóm mới nào để thêm (Tất cả đã tồn tại).")
-                    
             else:
-                # Trường hợp không tìm thấy, bạn có thể tự động tạo mới một bản ghi SocialAccount nếu muốn,
-                # nhưng ở đây ta xử lý log báo lỗi giống như logic cũ của bạn:
-                print(f"❌ Không tìm thấy tài khoản có UID {uid} trong bảng social_accounts để lưu groups")
+                # 🔄 BƯỚC CẬP NHẬT (Nếu account đã tồn tại)
+                print(f"🔄 UID {uid} đã tồn tại trong hệ thống. Cập nhật thông tin cơ bản...")
+                if account.username != username:
+                    account.username = username
+                # Không cần session.add(account) ở đây vì SQLAlchemy tự track đối tượng cũ khi có thay đổi
 
+            # =========================================================================
+            # ĐOẠN DƯỚI NÀY DÙNG CHUNG CHO CẢ TẠO MỚI VÀ CẬP NHẬT (Đã đưa ra ngoài if-else)
+            # =========================================================================
+
+            # 2. Xử lý chống trùng lặp nhóm (Idempotency)
+            # Lấy danh sách ID các nhóm hiện tại đang có trong DB của UID này
+            existing_ids = {g.get("group_id") for g in account.groups_data if "group_id" in g}
+
+            # Lọc lấy những nhóm thực sự mới từ danh sách Worker vừa cào được
+            new_groups = [g for g in groups if g.get("group_id") not in existing_ids]
+
+            if new_groups:
+                # 3. Nối thẳng danh sách nhóm mới vào mảng phẳng groups_data
+                account.groups_data.extend(new_groups)
+                account.updated_at = datetime.now(vnTZObject)
+                
+                # Ép SQLAlchemy nhận biết trường JSONB này đã bị thay đổi
+                flag_modified(account, "groups_data")
+                
+                # Đảm bảo account (dù mới hay cũ) đều được đưa vào trạng thái sẵn sàng lưu
+                session.add(account) 
+                session.commit()
+                print(f"🚀 [Worker] Đã cập nhật thêm {len(new_groups)} nhóm mới vào Postgres cho UID {uid}!")
+            else:
+                # Nếu có thay đổi username ở nhánh `else` phía trên nhưng không có nhóm mới, vẫn cần commit
+                session.commit() 
+                print(f"ℹ️ [Worker] UID {uid}: Không tìm thấy nhóm mới nào để thêm (Tất cả đã tồn tại).")
         return {"status": "completed", "uid": uid}
 
     except Exception as e:

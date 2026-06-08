@@ -6,6 +6,9 @@ from typing import List
 from fastapi import APIRouter, Form, File, UploadFile, HTTPException, Body, Depends
 import aiofiles
 from rq import Queue
+from rq.registry import StartedJobRegistry
+from rq.exceptions import NoSuchJobError
+from rq.job import Job, JobStatus
 from database import redis_client # sử dụng chung một kết nối
 
 from core.deps import get_user_session
@@ -109,6 +112,23 @@ async def post_by_group_ids(
 
 @router.post("/scan-group")
 async def scan_group(uid: str = Form(...), username: str = Form(...)):
+    # 1. Lấy danh sách các Job đang chạy trong hàng đợi
+    registry = StartedJobRegistry(queue=queue)
+    running_job_ids = registry.get_job_ids()
+    waiting_job_ids = queue.get_job_ids()
+    
+    all_active_job_ids = running_job_ids + waiting_job_ids
+
+    # 2. Kiểm tra xem có Job nào trùng UID đang chạy không
+    for j_id in all_active_job_ids:
+        try:
+            active_job = Job.fetch(j_id, connection=redis_client)
+            # active_job.args[0] chính là tham số 'uid' được truyền vào hàm target_scan_group_function
+            if active_job.args and active_job.args[0] == uid:
+                raise HTTPException(status_code=400, detail="Tài khoản này đang được bot quét rồi, vui lòng đợi xong!")
+        except:
+            continue
+
     session_data = get_user_session(uid)
 
     task_data = {
@@ -119,6 +139,7 @@ async def scan_group(uid: str = Form(...), username: str = Form(...)):
     }
 
     job = queue.enqueue(run_selenium_scan_group, task_data)
+    print(job.get_status())
     return {"status": "queued", "job_id": job.id}
 
 @router.post("/post-group")
@@ -158,3 +179,40 @@ async def post_group(
     }
     job = queue.enqueue(run_selenium_task, task_data)
     return {"status": "queued", "job_id": job.id, "images_received": len(saved_paths)}
+
+# 4. API Kiểm tra trạng thái Job (GET) - Được gọi liên tục từ JS
+@router.get("/check-job/{job_id}")
+async def check_job_status(job_id: str):
+    try:
+        # Khởi tạo đối tượng Job từ job_id thông qua kết nối Redis
+        print(job_id)
+        job = Job.fetch(job_id, connection=redis_client)
+        print(job)
+        rq_status = job.get_status()
+        
+        # Khởi tạo dữ liệu mặc định trả về cho frontend
+        frontend_status = "failed"
+
+        # Sử dụng object JobStatus để so sánh cho chuẩn chỉ và tường minh
+        if rq_status == JobStatus.QUEUED or rq_status == JobStatus.DEFERRED:
+            frontend_status = "pending"
+            
+        elif rq_status == JobStatus.STARTED:
+            frontend_status = "processing"
+            
+        elif rq_status == JobStatus.FINISHED:
+            frontend_status = "completed"
+            
+        elif rq_status == JobStatus.FAILED:
+            frontend_status = "failed"
+
+        return {
+            "job_id": job_id,
+            "status": frontend_status
+        }
+        
+    except NoSuchJobError:
+        # Lỗi xảy ra nếu Job ID không có thực hoặc đã bị xóa khỏi Redis sau một thời gian
+        raise HTTPException(status_code=404, detail="Không tìm thấy tác vụ hoặc tác vụ đã quá hạn")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi hệ thống: {str(e)}")

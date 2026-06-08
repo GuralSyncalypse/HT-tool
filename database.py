@@ -19,5 +19,5 @@ redis_client = redis.Redis(
     host="localhost", 
     port=6379, 
     db=0, 
-    decode_responses=True  # Tự động decode bytes thành chuỗi string string cho dễ dùng
+    decode_responses=False  # Tự động decode bytes thành chuỗi string string cho dễ dùng
 )
