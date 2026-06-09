@@ -17,6 +17,7 @@ from tasks import run_selenium_scan_group, run_selenium_task
 from database import get_db_session, redis_client  
 from sqlmodel import Session, select
 from models import SocialAccount
+from security import verify_odoo_hook
 
 router = APIRouter(prefix='/bot', tags=["Bot Automation"])
 queue = Queue(connection=redis_client)
@@ -216,3 +217,8 @@ async def check_job_status(job_id: str):
         raise HTTPException(status_code=404, detail="Không tìm thấy tác vụ hoặc tác vụ đã quá hạn")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi hệ thống: {str(e)}")
+    
+@router.post("/ping", dependencies=[Depends(verify_odoo_hook)])
+async def ping_odoo(payload, db: Session = Depends(get_db_session)):
+    print(payload)
+    return {"status": "success"}

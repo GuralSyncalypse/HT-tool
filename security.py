@@ -1,8 +1,24 @@
 import jwt
+import os
 from datetime import datetime, timedelta, timezone
 from pwdlib import PasswordHash
 from pwdlib.hashers.bcrypt import BcryptHasher
-from fastapi import HTTPException, status
+from fastapi import HTTPException, status, Security, Request
+from fastapi.security import APIKeyHeader
+from dotenv import load_dotenv
+
+# Lấy Key từ file .env ra
+load_dotenv()
+
+# Khai báo cổng check Header: Hệ thống sẽ tìm header tên 'X-Odoo-Key'
+api_key_header = APIKeyHeader(
+    name="X-API-Key",
+    auto_error=False
+)
+
+VALID_KEYS = {
+    "odoo": os.getenv("ODOO_SECRET_KEY")
+}
 
 # Thay thế CryptContext của passlib bằng PasswordHash của pwdlib
 PWD_CONTEXT = PasswordHash((BcryptHasher(),))
@@ -12,11 +28,27 @@ SECRET_KEY = "SIEUBAOMAT_123457"
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30  # Token có hiệu lực trong 30 phút
 
+async def verify_odoo_hook(api_key: str = Security(api_key_header)):
+    """
+    Dependency Hook dùng để validate request đến từ Odoo.
+    """
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing API Key in Header"
+        )
+        
+    if api_key not in VALID_KEYS.values():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid API Key"
+        )
+        
+    return True
+
 def hash_password(password: str) -> str:
     """Mã hóa mật khẩu thành chuỗi hash không thể dịch ngược"""
-    # pwdlib xử lý trực tiếp chuỗi str, loại bỏ hoàn toàn việc encode/decode bytes cồng kềnh cũ
     hashed = PWD_CONTEXT.hash(password)
-    print(hashed)
     return hashed
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
