@@ -421,7 +421,7 @@ class FacebookBot:
         return joined_groups
 
     def create_post(self, id, content="", img_paths=[]):
-        self.driver.get(f"https://www.facebook.com/{id}")
+        self.driver.get(f"https://www.facebook.com/groups/{id}")
         post_box_xpath = "//span[contains(text(),'mind') or contains(text(),'nghĩ gì') or contains(text(),'something') or contains(text(),'viết gì')]"
 
         try:
@@ -445,9 +445,8 @@ class FacebookBot:
         print("Đã vào hộp đăng bài")
 
         # Cô lập Form
-        editor = composer.find_element(
-            By.XPATH,
-            ".//div[@role='textbox']"
+        editor = WebDriverWait(composer, 4, poll_frequency=0.1).until(
+            EC.visibility_of_element_located((By.XPATH, ".//div[@role='textbox']"))
         )
 
         editor.click()
@@ -549,7 +548,7 @@ class FacebookBot:
         actions = ActionChains(self.driver)
         actions.move_to_element(post_btn).perform() # Rê chuột đến ô đăng bài
         time.sleep(random.uniform(0.3, 0.7))        # Giữ chuột ở đó một tí
-        actions.click(post_btn).perform()                   # Bấm chuột
+        #actions.click(post_btn).perform()                   # Bấm chuột
         
         print("Hoàn tất đăng bài")
         return True
@@ -625,7 +624,6 @@ def run_selenium_scan_group(data: dict):
     bot = FacebookBot()
     bot.user_agent = data.get("user_agent", "")
 
-
     try:
         # 2. Đăng nhập
         if not bot.login_with_cookies(uid, data.get("cookie_json", [])):
@@ -634,7 +632,6 @@ def run_selenium_scan_group(data: dict):
 
         # 3. Điều phối tác vụ (Rẽ nhánh gọi hàm riêng biệt)
         groups = bot.scrape_joined_groups()
-        print(groups)
 
         with Session(engine) as session:
             # 1. Tìm tài khoản bằng UID trong bảng social_accounts
@@ -696,7 +693,7 @@ def run_selenium_scan_group(data: dict):
                 print(f"🚀 [Worker] Đã cập nhật thêm {len(new_groups)} nhóm mới vào Postgres cho UID {uid}!")
             else:
                 # Nếu có thay đổi username ở nhánh `else` phía trên nhưng không có nhóm mới, vẫn cần commit
-                session.commit() 
+                session.commit()
                 print(f"ℹ️ [Worker] UID {uid}: Không tìm thấy nhóm mới nào để thêm (Tất cả đã tồn tại).")
         return {"status": "completed", "uid": uid}
 
@@ -748,6 +745,7 @@ def clean_temporary_images(imgs_path: list, uid: str):
 
     print(f"[Task {uid}] Bắt đầu dọn dẹp {len(imgs_path)} file ảnh tạm.")
     for path in imgs_path:
+        print(path)
         try:
             if os.path.exists(path):
                 os.remove(path)

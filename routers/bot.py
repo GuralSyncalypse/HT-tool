@@ -104,10 +104,9 @@ async def post_by_group_ids(
     }
 
     # 4. Đẩy sang cho RQ Worker chạy ngầm (Truyền thêm content và danh sách ảnh vào bọc Selenium)
-    job = queue.enqueue(run_selenium_task, task_data)
+    job = queue.enqueue(run_selenium_task, task_data, job_timeout=-1)
 
     print(f"🚀 Đã đẩy {len(unique_ids)} ID nhóm kèm bài viết '{content}' và {len(images)} ảnh xuống Worker")
-
 
     return {"status": "queued", "job_id": job.id, "images_received": len(saved_paths)}
 
@@ -143,77 +142,51 @@ async def scan_group(uid: str = Form(...), username: str = Form(...)):
     print(job.get_status())
     return {"status": "queued", "job_id": job.id}
 
-@router.post("/post-group")
-async def post_group(
-    uid: str = Form(...),
-    action: str = Form(...),
-    content: str = Form(""),
-    images: List[UploadFile] = File(default=[])
-):
-    session_data = get_user_session(uid)
-    saved_paths = []
-    
-    if images:
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
-        for img in images:
-            if not img.filename:
-                continue
-            ext = os.path.splitext(img.filename)[1].lower()
-            # Khử trùng lặp file bằng UUID
-            filename = f"task_{uid}_{uuid.uuid4().hex}{ext}"
-            file_path = os.path.join(UPLOAD_DIR, filename)
-            
-            # Ghi file bất đồng bộ (Non-blocking I/O)
-            content_binary = await img.read()
-            async with aiofiles.open(file_path, "wb") as f:
-                await f.write(content_binary)
-                
-            saved_paths.append(os.path.abspath(file_path))
-
-    task_data = {
-        "uid": uid,
-        "cookie_json": session_data.get("cookies", []),
-        "user_agent": session_data.get("user_agent", ""),
-        "action": action,
-        "text_content": content,
-        "image_paths": saved_paths  
-    }
-    job = queue.enqueue(run_selenium_task, task_data)
-    return {"status": "queued", "job_id": job.id, "images_received": len(saved_paths)}
-
 # 4. API Kiểm tra trạng thái Job (GET) - Được gọi liên tục từ JS
 @router.get("/check-job/{job_id}")
 async def check_job_status(job_id: str):
     try:
         # Khởi tạo đối tượng Job từ job_id thông qua kết nối Redis
-        print(job_id)
         job = Job.fetch(job_id, connection=redis_client)
-        print(job)
         rq_status = job.get_status()
         
-        # Khởi tạo dữ liệu mặc định trả về cho frontend
+        # Khởi tạo dữ liệu mặc định và payload trả về
         frontend_status = "failed"
-
-        # Sử dụng object JobStatus để so sánh cho chuẩn chỉ và tường minh
-        if rq_status == JobStatus.QUEUED or rq_status == JobStatus.DEFERRED:
-            frontend_status = "pending"
-            
-        elif rq_status == JobStatus.STARTED:
-            frontend_status = "processing"
-            
-        elif rq_status == JobStatus.FINISHED:
-            frontend_status = "completed"
-            
-        elif rq_status == JobStatus.FAILED:
-            frontend_status = "failed"
-
-        return {
+        response_data = {
             "job_id": job_id,
             "status": frontend_status
         }
+
+        print(rq_status)
+        # Sử dụng object JobStatus để so sánh chuẩn chỉ
+        if rq_status in [JobStatus.QUEUED, JobStatus.DEFERRED]:
+            response_data["status"] = "pending"
+            
+        elif rq_status == JobStatus.STARTED:
+            response_data["status"] = "processing"
+            
+        elif rq_status == JobStatus.FINISHED:
+            response_data["status"] = "completed"
+            # Trả thêm kết quả thành công nếu cần (ví dụ: {"status": "completed", "uid": "..."})
+            response_data["result"] = job.result 
+            
+        elif rq_status == JobStatus.FAILED:
+            response_data["status"] = "failed"
+            
+            # --- ĐOẠN BỔ SUNG: Bốc tách lỗi crash từ Selenium gửi về ---
+            if job.exc_info:
+                # Lấy dòng cuối cùng của traceback (thường chứa nội dung lỗi chính xác)
+                error_lines = job.exc_info.strip().split('\n')
+                main_error = error_lines[-1] if error_lines else "Unknown Selenium Crash"
+                
+                response_data["error"] = "Selenium_Crash"
+                response_data["message"] = main_error
+            else:
+                response_data["message"] = "Tác vụ thất bại không rõ nguyên nhân."
+
+        return response_data
         
     except NoSuchJobError:
-        # Lỗi xảy ra nếu Job ID không có thực hoặc đã bị xóa khỏi Redis sau một thời gian
         raise HTTPException(status_code=404, detail="Không tìm thấy tác vụ hoặc tác vụ đã quá hạn")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi hệ thống: {str(e)}")

@@ -46,7 +46,8 @@ def get_active_accounts(db: Session = Depends(get_db_session)):
     for uid in active_uids:
         if uid not in account_mapping:
             account_mapping[uid] = "unknown"
-            
+    
+    print(account_mapping)
     # 3. TRẢ VỀ CẢ HAI: Vừa có 'uids' cho tác vụ cũ, vừa có 'accounts' cho Odoo
     return {
         "uids": active_uids,               # <--- Tác vụ cũ dùng cái này (Dạng List)

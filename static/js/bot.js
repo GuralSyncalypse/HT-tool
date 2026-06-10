@@ -59,7 +59,7 @@ const selectUid = document.getElementById("select-uid");
 // }
 
 // Hàm phụ: Tự động chạy ngầm đi hỏi thăm trạng thái của Job ID
-async function checkUpdateJobStatus(jobId) {
+async function checkJobStatus(jobId) {
     try {
         const response = await fetch(`/api/v1/bot/check-job/${jobId}`);
         if (!response.ok) return "failed";
@@ -72,7 +72,7 @@ async function checkUpdateJobStatus(jobId) {
 }
 
 // Hàm phụ trách chạy vòng lặp Polling (Tách riêng ra để tái sử dụng)
-async function startPolling(btnUpdate, originalText, jobId) {
+async function startPolling(btnUpdate, originalText, jobId, taskName) {
     let isDone = false;
     
     // Bật hiệu ứng quay và khóa nút
@@ -81,16 +81,16 @@ async function startPolling(btnUpdate, originalText, jobId) {
 
     while (!isDone) {
         await new Promise(resolve => setTimeout(resolve, 2000)); 
-        const status = await checkUpdateJobStatus(jobId);
+        const status = await checkJobStatus(jobId);
         
         if (status === "completed") {
             alert("Bot đã quét và cập nhật nhóm thành công! 🎉");
             isDone = true;
-            localStorage.removeItem("current_scan_job_id"); // Xóa ID khi xong
+            localStorage.removeItem(taskName); // Xóa ID khi xong
         } else if (status === "failed") {
             alert("Tác vụ quét nhóm ngầm bị lỗi hoặc đã thất bại! ❌");
             isDone = true;
-            localStorage.removeItem("current_scan_job_id"); // Xóa ID khi lỗi
+            localStorage.removeItem(taskName); // Xóa ID khi lỗi
         }
         // Nếu "pending" hoặc "processing", vòng lặp tiếp tục chạy...
     }
@@ -107,10 +107,11 @@ export function initUpdateGroupButton() {
     const originalText = btnUpdate.innerHTML;
 
     // 🌟 LOGIC QUAN TRỌNG: Kiểm tra ngay khi vừa load/reset lại trang
-    const savedJobId = localStorage.getItem("current_scan_job_id");
+    const taskName = "current_scan_job_id"
+    const savedJobId = localStorage.getItem(taskName);
     if (savedJobId) {
         // Nếu tìm thấy job_id cũ chưa chạy xong, tự động kích hoạt lại vòng lặp quay nút
-        startPolling(btnUpdate, originalText, savedJobId);
+        startPolling(btnUpdate, originalText, savedJobId, taskName);
     }
 
     btnUpdate.addEventListener("click", async function() {
@@ -141,10 +142,10 @@ export function initUpdateGroupButton() {
 
             if (response.ok && result.job_id) {
                 // 🌟 Lưu job_id vào bộ nhớ trình duyệt trước khi chạy Polling
-                localStorage.setItem("current_scan_job_id", result.job_id);
+                localStorage.setItem(taskName, result.job_id);
                 
                 // Kích hoạt vòng lặp chờ backend
-                await startPolling(btnUpdate, originalText, result.job_id);
+                await startPolling(btnUpdate, originalText, result.job_id, taskName);
             } else {
                 alert(`Lỗi: ${result.detail || "Không thể chạy bot"}`);
                 btnUpdate.disabled = false;
@@ -164,55 +165,54 @@ import { getSelectedFiles, resetUploader } from "./imageUploader.js";
 import { selectedGroups } from "./groups.js";
 import { fetchWithAuth } from "./main.js";
 
-// Hàm phụ: Kiểm tra trạng thái của tác vụ Đăng bài ngầm
-async function checkJobStatus(jobId) {
-    try {
-        const response = await fetch(`/api/v1/bot/check-job/${jobId}`);
-        if (!response.ok) return "failed";
-        
-        const result = await response.json();
-        return result.status; // Trả về: "pending" | "processing" | "completed" | "failed"
-    } catch (error) {
-        console.error("Lỗi khi kết nối kiểm tra trạng thái đăng bài:", error);
-        return "failed";
-    }
-}
-
 export function initPostButton() {
     const btnPost = document.getElementById("btn-start");
+    const taskName = "current_post_job_id";
+
     if (!btnPost) return;
+
+    const originalText = btnPost.innerHTML;
+
+    // --- KHÔI PHỤC ĐỘNG KHI F5 / TRANH CHẤP TRANG ---
+    const savedJobId = localStorage.getItem(taskName);
+    if (savedJobId) {
+        console.log(`Phát hiện tiến trình cũ chưa xong (#${savedJobId}). Đang khôi phục Polling...`);
+        // Tự động chạy lại vòng lặp quản lý nút bấm
+        startPolling(btnPost, originalText, savedJobId, taskName);
+    }
 
     btnPost.addEventListener("click", async () => {
         const uid = document.getElementById("select-uid")?.value;
         const usernameElement = document.getElementById("user-display-name"); 
         const username = usernameElement ? usernameElement.innerText.trim() : "";
         const content = document.getElementById("content-box")?.value || "";
-        const selectedFiles = getSelectedFiles(); 
+        const selectedFiles = typeof getSelectedFiles === "function" ? getSelectedFiles() : []; 
 
-        if (!uid || !username) { alert("Vui lòng chọn tài khoản hợp lệ!"); return; }
+        // Kiểm tra điều kiện đầu vào
+        if (!uid || !username) { 
+            alert("Vui lòng chọn tài khoản hợp lệ!"); 
+            return; 
+        }
 
         if (content === '') {
             alert("Vui lòng nhập nội dung!");
             return;
         }   
 
+        // Chuẩn bị dữ liệu Form
         const formData = new FormData();
         formData.append("uid", uid);
         formData.append("username", username);
         formData.append("content", content);
 
-        if (selectedGroups.length === 0) {
+        // Giả định biến selectedGroups tồn tại ở phạm vi ngoài (global/module scope)
+        if (typeof selectedGroups === "undefined" || selectedGroups.length === 0) {
             formData.append("group_ids", "ALL");
         } else {
             formData.append("group_ids", JSON.stringify(selectedGroups));
         }
 
         selectedFiles.forEach((file) => { formData.append("images", file); });
-
-        // --- BƯỚC 1: BẬT HIỆU ỨNG QUAY NÚT ---
-        const originalText = btnPost.innerHTML; // Lưu lại chữ gốc để khôi phục sau
-        btnPost.disabled = true;
-        btnPost.innerHTML = `<span class="spinner"></span> Đang đăng bài...`;
 
         try {
             // --- BƯỚC 2: GỬI LỆNH TẠO JOB ĐĂNG BÀI ---
@@ -225,42 +225,24 @@ export function initPostButton() {
 
             if (response.ok && result.job_id) {
                 const jobId = result.job_id;
-                let isDone = false;
 
-                // --- BƯỚC 3: VÒNG LẶP HỎI THĂM TIẾN ĐỘ BACKEND ---
-                while (!isDone) {
-                    // Nghỉ 2 giây trước khi hỏi lần tiếp theo
-                    await new Promise(resolve => setTimeout(resolve, 2000)); 
-                    
-                    const status = await checkPostJobStatus(jobId);
-                    
-                    if (status === "completed") {
-                        alert("Bot đã hoàn tất đăng bài lên các nhóm thành công! 🎉");
-                        
-                        // Xóa sạch nội dung ô nhập và ảnh preview
-                        document.getElementById("content-box").value = '';
-                        if (typeof resetUploader === "function") {
-                            resetUploader(btnPost, imagePreviewContainer);
-                        }
-                        
-                        isDone = true; // Thoát vòng lặp
-                    } else if (status === "failed") {
-                        alert("Bot xử lý đăng bài thất bại hoặc hàng đợi bị hủy! ❌");
-                        isDone = true; // Thoát vòng lặp
-                    }
-                    // Nếu status là "pending" hay "processing", nút VẪN QUAY liên tục
-                }
-            }
-            else {
-                alert(`Gửi bài thất bại: ${result.detail || "Vui lòng kiểm tra cấu hình."}`);
+                // 🌟 Lưu động job_id vào bộ nhớ với taskName tương ứng
+                localStorage.setItem(taskName, jobId);
+                
+                // Kích hoạt vòng lặp chờ backend xử lý (Hàm này sẽ chịu trách nhiệm unlock nút khi xong)
+                await startPolling(btnPost, originalText, jobId, taskName);
+
+            } else {
+                alert(`Gửi bài thất bại: ${result.detail || "Vui lòng kiểm tra cấu hình hoặc bot không thể chạy."}`);
+                // Khôi phục nút nếu API trả lỗi cấu hình đầu vào công việc
+                btnPost.disabled = false;
+                btnPost.innerHTML = originalText;
             }
         } 
         catch (error) {
-            console.error("Lỗi kết nối:", error);
+            console.error("Lỗi kết nối API khởi tạo:", error);
             alert("Không thể kết nối tới Server API!");
-        } 
-        finally {
-            // --- BƯỚC 4: TẮT QUAY, MỞ KHÓA NÚT ---
+            // Khôi phục nút nếu lỗi mạng không gửi được lệnh tạo Job
             btnPost.disabled = false;
             btnPost.innerHTML = originalText;
         }
