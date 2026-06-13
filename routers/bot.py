@@ -2,26 +2,93 @@
 import os
 import uuid
 import json
-from typing import List
-from fastapi import APIRouter, Form, File, UploadFile, HTTPException, Body, Depends
 import aiofiles
+import asyncio
+from typing import List
+from fastapi import APIRouter, Form, File, UploadFile, HTTPException, Body, Depends, Request
 from rq import Queue
 from rq.registry import StartedJobRegistry
 from rq.exceptions import NoSuchJobError
 from rq.job import Job, JobStatus
-from database import redis_client # sử dụng chung một kết nối
 
 from core.deps import get_user_session
 from tasks import run_selenium_scan_group, run_selenium_task
 
-from database import get_db_session, redis_client  
+from database import get_db_session, redis_client, async_redis_client
 from sqlmodel import Session, select
 from models import SocialAccount
 from security import verify_odoo_hook
+from sse_starlette.sse import EventSourceResponse
+
+# Lưu trữ các queue lắng nghe theo từng Job ID
+# Key: job_id, Value: asyncio.Queue()
+active_job_streams = {}
 
 router = APIRouter(prefix='/bot', tags=["Bot Automation"])
 queue = Queue(connection=redis_client)
 UPLOAD_DIR = "./bot_media_tmp"
+
+@router.get("/job-stream/{job_id}")
+async def job_stream(request: Request, job_id: str):
+    
+    async def event_generator():
+        # Đăng ký kênh Pub/Sub trước để tránh sót tin nhắn trong lúc check trạng thái
+        pubsub = async_redis_client.pubsub()
+        channel_name = f"job_channel:{job_id}"
+        await pubsub.subscribe(channel_name)
+        
+        print(f"🔌 [SSE Connect] Trình duyệt đã kết nối vào luồng Job: {job_id}")
+        
+        # --- ✨ LOGIC KIỂM TRA TRẠNG THÁI HIỆN TẠI CỦA TÁC VỤ ---
+        initial_status = "connected" 
+        try:
+            # Dùng redis_client đồng bộ để fetch thông tin Job từ RQ
+            rq_job = Job.fetch(job_id, connection=redis_client)
+            rq_status = rq_job.get_status() # Các trạng thái: 'queued', 'started', 'finished', 'failed'
+            
+            if rq_status == "started":
+                # Nếu RQ báo 'started' nghĩa là Worker đang ôm Selenium chạy rồi!
+                initial_status = "processing"
+            elif rq_status == "finished":
+                initial_status = "completed"
+            elif rq_status == "failed":
+                initial_status = "failed"
+        except Exception as e:
+            print(f"⚠️ Không thể check trạng thái RQ cho job {job_id}: {e}")
+
+        # Gửi trạng thái thực tế này xuống Frontend ngay khi vừa kết nối xong
+        yield dict(data=json.dumps({"status": initial_status}))
+        
+        # Nếu job đã xong hoặc lỗi từ trước, ngắt kết nối luôn không cần loop nữa
+        if initial_status in ["completed", "failed"]:
+            await pubsub.unsubscribe(channel_name)
+            return
+
+        # --- VÒNG LẶP HÓNG CÁC SỰ KIỆN TIẾP THEO ---
+        try:
+            while True:
+                if await request.is_disconnected():
+                    print(f"❌ [SSE Disconnect] Trình duyệt đã ngắt kết nối | Job: {job_id}")
+                    break
+                
+                # Timeout thấp để vòng lặp xoay liên tục, check ngắt kết nối nhạy hơn
+                message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.2)
+                
+                if message:
+                    raw_data = message['data']
+                    data_str = raw_data.decode('utf-8') if isinstance(raw_data, bytes) else raw_data
+                    status_data = json.loads(data_str)
+                    
+                    yield dict(data=json.dumps(status_data))
+                    
+                    if status_data.get("status") in ["completed", "failed"]:
+                        break
+                        
+                await asyncio.sleep(0.2)
+        finally:
+            await pubsub.unsubscribe(channel_name)
+
+    return EventSourceResponse(event_generator())
 
 @router.post("/post-by-group-ids")
 async def post_by_group_ids(
@@ -141,55 +208,6 @@ async def scan_group(uid: str = Form(...), username: str = Form(...)):
     job = queue.enqueue(run_selenium_scan_group, task_data)
     print(job.get_status())
     return {"status": "queued", "job_id": job.id}
-
-# 4. API Kiểm tra trạng thái Job (GET) - Được gọi liên tục từ JS
-@router.get("/check-job/{job_id}")
-async def check_job_status(job_id: str):
-    try:
-        # Khởi tạo đối tượng Job từ job_id thông qua kết nối Redis
-        job = Job.fetch(job_id, connection=redis_client)
-        rq_status = job.get_status()
-        
-        # Khởi tạo dữ liệu mặc định và payload trả về
-        frontend_status = "failed"
-        response_data = {
-            "job_id": job_id,
-            "status": frontend_status
-        }
-
-        print(rq_status)
-        # Sử dụng object JobStatus để so sánh chuẩn chỉ
-        if rq_status in [JobStatus.QUEUED, JobStatus.DEFERRED]:
-            response_data["status"] = "pending"
-            
-        elif rq_status == JobStatus.STARTED:
-            response_data["status"] = "processing"
-            
-        elif rq_status == JobStatus.FINISHED:
-            response_data["status"] = "completed"
-            # Trả thêm kết quả thành công nếu cần (ví dụ: {"status": "completed", "uid": "..."})
-            response_data["result"] = job.result 
-            
-        elif rq_status == JobStatus.FAILED:
-            response_data["status"] = "failed"
-            
-            # --- ĐOẠN BỔ SUNG: Bốc tách lỗi crash từ Selenium gửi về ---
-            if job.exc_info:
-                # Lấy dòng cuối cùng của traceback (thường chứa nội dung lỗi chính xác)
-                error_lines = job.exc_info.strip().split('\n')
-                main_error = error_lines[-1] if error_lines else "Unknown Selenium Crash"
-                
-                response_data["error"] = "Selenium_Crash"
-                response_data["message"] = main_error
-            else:
-                response_data["message"] = "Tác vụ thất bại không rõ nguyên nhân."
-
-        return response_data
-        
-    except NoSuchJobError:
-        raise HTTPException(status_code=404, detail="Không tìm thấy tác vụ hoặc tác vụ đã quá hạn")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi hệ thống: {str(e)}")
     
 @router.post("/ping", dependencies=[Depends(verify_odoo_hook)])
 async def ping_odoo(payload, db: Session = Depends(get_db_session)):

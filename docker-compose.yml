@@ -46,6 +46,29 @@ services:
       - SE_NODE_MAX_SESSIONS=3 # Cho phép chạy tối đa 3 trình duyệt cùng lúc (khớp với 3 workers)
       - SE_NODE_OVERRIDE_MAX_SESSIONS=true
 
+  # --- DỊCH VỤ FASTAPI (Ứng dụng chính của bạn) ---
+  fastapi:
+    build: .
+    container_name: fastapi_app
+    working_dir: /app
+    ports:
+      - "8000:8000" # Mở cổng 8000 ra máy thật để bạn test API / Docs
+    volumes:
+      - .:/app # Mount code trực tiếp từ máy thật vào container để sửa code không cần restart
+    # Lệnh chạy FastAPI với Uvicorn, bật cờ --reload để tự nhận code mới khi lưu
+    # Giả sử file chạy của bạn là main.py và đối tượng FastAPI đặt tên là app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    depends_on:
+      postgres_db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://postgres:admin@postgres_db:5432/htland # URL kết nối nội bộ Docker
+      - REDIS_URL=redis://redis:6379/0
+
   worker:
     build: .
     working_dir: /app
@@ -58,7 +81,9 @@ services:
     environment:
       - PYTHONPATH=/app
       - PYTHONUNBUFFERED=1
-      - SELENIUM_REMOTE_URL=http://chrome:4444/wd/hub # Khai báo đường dẫn kết nối tới container chrome
+      - SELENIUM_REMOTE_URL=http://chrome:4444/wd/hub
+      - DATABASE_URL=postgresql://postgres:admin@postgres_db:5432/htland
+      - REDIS_URL=redis://redis:6379/0
     deploy:
       mode: replicated
       replicas: 3

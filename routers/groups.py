@@ -1,12 +1,13 @@
 # routers/groups.py
 import json
 from typing import List, Optional
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, status
 from pydantic import BaseModel
 from sqlmodel import select
 from sqlalchemy.orm import Session
 
-from database import get_db_session, redis_client  
+from database import get_db_session, redis_client, async_redis_client
+import redis.asyncio as aioredis  
 from models import GroupDetail, SocialAccount
 
 router = APIRouter(tags=["Data Processing"])
@@ -55,10 +56,31 @@ def get_active_accounts(db: Session = Depends(get_db_session)):
     }
 
 @router.post("/cookies")
-def save_cookie(data: CookieData):
-    session_data = {"cookies": data.cookie_json, "user_agent": data.user_agent}
-    redis_client.set(f"cookies:{data.uid}", json.dumps(session_data), ex=86400)
-    return {"status": "Đã lưu vào Redis thành công", "uid": data.uid}
+async def save_cookie(data: CookieData):
+    if not data.uid or data.uid == "unknown":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="UID không hợp lệ"
+        )
+        
+    session_data = {
+        "cookies": data.cookie_json, 
+        "user_agent": data.user_agent
+    }
+    
+    try:
+        # Chạy mượt mà, không block hệ thống
+        await async_redis_client.set(
+            name=f"cookies:{data.uid}", 
+            value=json.dumps(session_data), 
+            ex=86400
+        )
+        return {"status": "success", "message": "Đã lưu vào Redis thành công", "uid": data.uid}
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Lỗi kết nối cơ sở dữ liệu lưu trữ"
+        )
 
 @router.get("/get-groups", response_model=PaginatedGroupResponse)
 def get_groups(

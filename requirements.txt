@@ -10,4 +10,9 @@ sqlalchemy
 psycopg2-binary
 pwdlib[bcrypt]
 pyjwt[crypto]
-pyperclip
+fastapi
+jinja2
+dotenv
+python-multipart
+aiofiles
+sse-starlette

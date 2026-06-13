@@ -12,7 +12,7 @@ import time
 # NHÓM 2: Thư viện bên thứ ba (Third-party)
 # ==========================================
 from openpyxl import Workbook
-import redis
+from rq import get_current_job
 from selenium import webdriver
 from selenium.common.exceptions import (
     ElementClickInterceptedException,
@@ -33,18 +33,19 @@ from sqlmodel import Session, create_engine, select
 # ==========================================
 # NHÓM 3: Modules nội bộ (Tự tạo)
 # ==========================================
+from database import redis_client
 from models import SocialAccount, User, UserRegister, UserResponse
+
 vnTimeDelta = timedelta(hours=7)
 vnTZObject = timezone(vnTimeDelta, name="ICT")
 
-POSTGRES_URL = "postgresql://postgres:admin@postgres_db:5432/htland"
+POSTGRES_URL = os.getenv("DATABASE_URL", "postgresql://postgres:admin@localhost:5433/htland")
 engine = create_engine(POSTGRES_URL, echo=False)
 
 # 1. Bật tính năng phát hiện file cục bộ
 BASE_DIR = os.path.dirname(os.path.abspath(__file__)) # Thư mục /app
 
 # 1. Kết nối thẳng tới Redis từ file Selenium luôn
-redis_conn = redis.Redis(host='redis', port=6379, decode_responses=True)
 service = Service("/usr/bin/chromedriver")
 
 class FacebookBot:
@@ -621,13 +622,23 @@ def run_selenium_scan_group(data: dict):
     uid = data.get("uid")
     username = data.get("username")
 
+    # 1. Định nghĩa kênh giao tiếp dựa trên Job ID của RQ
+    current_job = get_current_job()
+    job_id = current_job.id if current_job else f"fallback_{uid}"
+    channel_name = f"job_channel:{job_id}"
+
     bot = FacebookBot()
     bot.user_agent = data.get("user_agent", "")
 
     try:
+        # Báo cho FastAPI SSE biết: Worker đã bốc task và bắt đầu xử lý
+        redis_client.publish(channel_name, json.dumps({"status": "processing"}))
+
         # 2. Đăng nhập
         if not bot.login_with_cookies(uid, data.get("cookie_json", [])):
             print("Failed login!")
+            # Phát tín hiệu thất bại do lỗi Auth về SSE
+            redis_client.publish(channel_name, json.dumps({"status": "failed", "reason": "auth_failed"}))
             return {"status": "failed", "reason": "auth_failed", "uid": uid}
 
         # 3. Điều phối tác vụ (Rẽ nhánh gọi hàm riêng biệt)
@@ -648,8 +659,9 @@ def run_selenium_scan_group(data: dict):
                 
                 if not user:
                     print(f"❌ Không thể tạo SocialAccount vì không tìm thấy User chính có tên: {username}")
-                    # Dừng luồng xử lý của job này ở đây vì dữ liệu mồ côi
-                    return 
+                    # Phát tín hiệu thất bại do dữ liệu mồ côi
+                    redis_client.publish(channel_name, json.dumps({"status": "failed", "reason": "user_not_found"}))
+                    return
                     
                 # 1.2. Khởi tạo đối tượng SocialAccount mới tinh
                 account = SocialAccount(
@@ -695,10 +707,15 @@ def run_selenium_scan_group(data: dict):
                 # Nếu có thay đổi username ở nhánh `else` phía trên nhưng không có nhóm mới, vẫn cần commit
                 session.commit()
                 print(f"ℹ️ [Worker] UID {uid}: Không tìm thấy nhóm mới nào để thêm (Tất cả đã tồn tại).")
+        
+        # Phát tín hiệu THÀNH CÔNG MỸ MÃN về cho FastAPI SSE
+        redis_client.publish(channel_name, json.dumps({"status": "completed"}))
         return {"status": "completed", "uid": uid}
 
     except Exception as e:
         print(f"[Task {uid}] Lỗi hệ thống: {str(e)}")
+        # Phát tín hiệu THẤT BẠI do crash hệ thống về cho FastAPI SSE kèm theo chi tiết lỗi
+        redis_client.publish(channel_name, json.dumps({"status": "failed", "error": str(e)}))
         return {"status": "error", "message": str(e), "uid": uid}
 
     finally:
