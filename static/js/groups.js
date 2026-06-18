@@ -1,5 +1,5 @@
 // groups.js
-import { fetchWithAuth } from "./main.js";
+import { fetchWithAuth } from "./auth.js";
 
 // Đảm bảo lấy chính xác các Element từ DOM
 const selectUid = document.getElementById("select-uid");

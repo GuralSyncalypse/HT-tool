@@ -1,3 +1,7 @@
+import { getSelectedFiles, resetUploader } from "./imageUploader.js";
+import { selectedGroups } from "./groups.js";
+import { fetchWithAuth } from "./auth.js";
+
 const imageInput = document.getElementById("imageInput");
 const imagePreviewContainer = document.getElementById("imagePreviewContainer");
 const startBtn = document.getElementById("btn-start");
@@ -130,11 +134,6 @@ export function initUpdateGroupButton() {
         }
     });
 }
-
-// bot.js
-import { getSelectedFiles, resetUploader } from "./imageUploader.js";
-import { selectedGroups } from "./groups.js";
-import { fetchWithAuth } from "./main.js";
 
 export function initPostButton() {
     const btnPost = document.getElementById("btn-start");

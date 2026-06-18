@@ -12,7 +12,7 @@ from rq.exceptions import NoSuchJobError
 from rq.job import Job, JobStatus
 
 from core.deps import get_user_session
-from tasks import run_selenium_scan_group, run_selenium_task
+from tasks import run_selenium_scan_group, run_selenium_task, run_messaging_task
 
 from database import get_db_session, redis_client, async_redis_client
 from sqlmodel import Session, select
@@ -89,6 +89,38 @@ async def job_stream(request: Request, job_id: str):
             await pubsub.unsubscribe(channel_name)
 
     return EventSourceResponse(event_generator())
+
+@router.post("/send-by-uids")
+async def send_by_uids(
+    uid: str = Form(...),
+    username: str = Form(...),
+    uid_list: str = Form(...),  # Nhận dưới dạng chuỗi văn bản do FormData gửi lên
+    content: str = Form(...)
+):
+    try:
+        # Giải mã chuỗi JSON từ Frontend thành mảng Python thực sự
+        actual_uid_list = json.loads(uid_list)
+        if not isinstance(actual_uid_list, list):
+            raise ValueError()
+    except Exception:
+        raise HTTPException(status_code=400, detail="Danh sách UID không đúng định dạng JSON Array")
+
+    session_data = get_user_session(uid)
+
+    task_data = {
+        "uid": uid,
+        "cookie_json": session_data.get("cookies", []),
+        "user_agent": session_data.get("user_agent", ""),
+        "uid_list": actual_uid_list,
+        "content": content,
+    }
+
+    # Tiến hành xử lý Job với actual_uid_list (ví dụ: ["10001", "10002", ...])
+    print(f"Đang xử lý gửi tin nhắn tới {len(actual_uid_list)} UIDs...")
+    
+    job = queue.enqueue(run_messaging_task, task_data, job_timeout=-1)
+
+    return {"status": "queued", "job_id": job.id}
 
 @router.post("/post-by-group-ids")
 async def post_by_group_ids(

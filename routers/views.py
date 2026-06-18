@@ -14,6 +14,11 @@ def home(request: Request):
 def login_view(request: Request):
     return templates.TemplateResponse(request=request, name="login.html")
 
+@router.get("/messaging", response_class=HTMLResponse)
+def messaging_view(request: Request):
+    return templates.TemplateResponse(request=request, name="messaging.html")
+
+
 @router.get("/register", response_class=HTMLResponse)
 def register_view(request: Request):
     return templates.TemplateResponse(request=request, name="register.html")

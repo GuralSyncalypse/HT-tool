@@ -141,6 +141,66 @@ class FacebookBot:
             self.close() # Đóng driver ngay nếu lỗi giữa chừng
             return False
 
+    def type_content_to_editor(self, editor, content):
+        def insert_to_editor(editor, text):
+            """Bắn chữ/emoji an toàn qua JS"""
+            self.driver.execute_script("""
+                var element = arguments[0];
+                var text = arguments[1];
+                element.focus();
+                document.execCommand('insertText', false, text);
+                element.dispatchEvent(new Event('input', { bubbles: true }));
+            """, editor, text)
+        editor.click()
+        
+        # Tách chuỗi: Giữ riêng emoji và giữ riêng cả dấu xuống dòng \n
+        tokens = re.split(r'([\U00010000-\U0010FFFF]|\n)', content)
+        
+        current_chunk = ""
+        target_length = random.randint(15, 35) # Độ dài ký tự ngẫu nhiên cho mỗi cụm
+        
+        for token in tokens:
+            if not token:
+                continue
+                
+            # TRƯỜNG HỢP 1: Gặp dấu xuống dòng
+            if token == '\n':
+                if current_chunk:
+                    insert_to_editor(editor, current_chunk)
+                    current_chunk = ""
+                
+                # Ép ô chatbox xuống dòng bằng Shift + Enter
+                editor.send_keys(Keys.SHIFT + Keys.ENTER)
+                time.sleep(0.05)
+                target_length = random.randint(15, 35) # Reset độ dài ngẫu nhiên
+                continue
+                
+            # TRƯỜNG HỢP 2: Gặp Emoji
+            if re.match(r'[\U00010000-\U0010FFFF]', token):
+                # Nếu cụm chữ hiện tại + emoji này dài quá target, đẩy cụm cũ đi trước
+                if len(current_chunk) + 1 >= target_length:
+                    insert_to_editor(editor, current_chunk)
+                    current_chunk = token # Emoji sẽ mở đầu cho cụm mới
+                    target_length = random.randint(15, 35)
+                    time.sleep(random.uniform(0.1, 0.2))
+                else:
+                    current_chunk += token
+                continue
+                
+            # TRƯỜNG HỢP 3: Chữ thường
+            current_chunk += token
+            
+            # Nếu tích lũy đủ độ dài ngẫu nhiên thì đẩy vào ô chat
+            if len(current_chunk) >= target_length:
+                insert_to_editor(editor, current_chunk)
+                current_chunk = ""
+                target_length = random.randint(15, 35)
+                time.sleep(random.uniform(0.1, 0.2))
+                
+        # Đẩy nốt phần nội dung còn lại (nếu có)
+        if current_chunk:
+            insert_to_editor(editor, current_chunk)
+
     # Giả lập hành vi con người
     def human_type_direct(self, editor_element, content: str):
         """
@@ -170,8 +230,50 @@ class FacebookBot:
             return False
 
     def send_message_via_uid(self, uid, content):
+        def human_delay(min_sec=0.5, max_sec=1.5):
+            """Tạo khoảng trễ ngẫu nhiên mô phỏng sự suy nghĩ của người dùng"""
+            time.sleep(random.uniform(min_sec, max_sec))
+
+        def human_scroll_to(element):
+            """Cuộn trang mượt mà và tự nhiên giống người thật"""
+            try:
+                # Cuộn từ từ đến vị trí element
+                desired_y = element.location['y'] - random.randint(150, 250)
+                current_y = self.driver.execute_script("return window.pageYOffset;")
+                step = 40 if desired_y > current_y else -40
+                
+                # Cuộn từng bước nhỏ
+                for pos in range(current_y, desired_y, step):
+                    self.driver.execute_script(f"window.scrollTo(0, {pos});")
+                    time.sleep(random.uniform(0.01, 0.03))
+                
+                # Cuộn chính xác bước cuối
+                self.driver.execute_script(f"window.scrollTo(0, {desired_y});")
+                human_delay(0.3, 0.7)
+            except Exception:
+                # Fallback nếu cuộn mượt bị lỗi
+                self.driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
+
+        def human_click(element):
+            """Click vào một điểm ngẫu nhiên trên nút thay vì click vào tâm"""
+            try:
+                size = element.size
+                # Lấy tọa độ ngẫu nhiên bên trong kích thước của nút (tránh sát rìa)
+                offset_x = random.randint(int(size['width'] * 0.2), int(size['width'] * 0.8))
+                offset_y = random.randint(int(size['height'] * 0.2), int(size['height'] * 0.8))
+                
+                # Di chuyển chuột tới phần tử và click với khoảng lệch ngẫu nhiên
+                action = ActionChains(self.driver)
+                action.move_to_element_with_offset(element, offset_x - (size['width']/2), offset_y - (size['height']/2))
+                action.click()
+                action.perform()
+            except Exception:
+                # Fallback nếu ActionChains bị chặn
+                element.click()
+
         def close_chat():
             try:
+                human_delay(1.5, 3.5) # Người thật nhìn màn hình một lúc rồi mới tắt
                 print("[+] Đang đóng chat...")
 
                 close_button = self.driver.find_element(
@@ -179,73 +281,51 @@ class FacebookBot:
                     '//div[@aria-label="Close chat"]'
                 )
 
-                close_button.click()
-
+                human_click(close_button)
                 print("[+] Đã đóng chat")
 
             except Exception as e:
-                print(
-                    f"[!] Close chat failed UID={uid}: {e}"
-                )
+                print(f"[!] Close chat failed UID={uid}: {e}")
 
         def find_message_button():
             try:
-                message_button = WebDriverWait(self.driver, 2).until(
+                message_button = WebDriverWait(self.driver, 4).until(
                     EC.element_to_be_clickable((
                         By.XPATH,
                         '//div[@aria-label="Message" or @aria-label="Nhắn tin"]'
                     ))
                 )
-
                 print("[+] Đã tìm thấy nút Message")
-
+                return message_button
             except TimeoutException as e:
-                raise Exception(
-                    f"[MESSAGE_BUTTON_TIMEOUT] UID={uid}"
-                ) from e
-            
+                raise Exception(f"[MESSAGE_BUTTON_TIMEOUT] UID={uid}") from e
             except NoSuchElementException as e:
-                raise Exception(
-                    f"[MESSAGE_BUTTON_NOT_FOUND] UID={uid}"
-                ) from e
-            
-            return message_button
+                raise Exception(f"[MESSAGE_BUTTON_NOT_FOUND] UID={uid}") from e
             
         def find_chatbox():
             try:
-                chatbox_xpath = (
-                    '//div[contains(@aria-label, "Write to")]'
+                chatbox_xpath = '//div[contains(@aria-label, "Write to")]'
+                chatbox = WebDriverWait(self.driver, 4).until(
+                    EC.presence_of_element_located((By.XPATH, chatbox_xpath))
                 )
-
-                chatbox = WebDriverWait(self.driver, 3).until(
-                    EC.presence_of_element_located(
-                        (By.XPATH, chatbox_xpath)
-                    )
-                )
-
                 print("[+] Đã tìm thấy chatbox")
-
-            except TimeoutException as e:
+                return chatbox
+            except Exception as e:
+                print(f"[!] Không tìm thấy chatbox cho UID={uid}. Tiến hành đóng chat...")
                 close_chat()
-                raise Exception(
-                    f"[CHATBOX_TIMEOUT] UID={uid}"
-                ) from e
+                raise Exception(f"[CHATBOX_TIMEOUT] UID={uid}") from e
             
-            return chatbox
-
         def clear_chatbox():
             try:
                 print("[+] Đang clear chatbox...")
-
+                human_click(chatbox) # Click vào trước khi xóa giống người thật
+                human_delay(0.2, 0.5)
                 chatbox.send_keys(Keys.CONTROL, "a")
+                human_delay(0.1, 0.3)
                 chatbox.send_keys(Keys.DELETE)
-
                 print("[+] Đã clear chatbox")
-
             except Exception as e:
-                print(
-                    f"[!] Clear chatbox failed UID={uid}: {e}"
-                )
+                print(f"[!] Clear chatbox failed UID={uid}: {e}")
 
         try:
             # =========================
@@ -253,43 +333,29 @@ class FacebookBot:
             # =========================
             try:
                 print(f"\n[+] Đang mở trang cá nhân UID: {uid}")
-
                 user_url = f"https://www.facebook.com/{uid}"
                 self.driver.get(user_url)
+                human_delay(2.0, 4.0) # Chờ trang tải và người dùng "nhìn" giao diện
 
             except Exception as e:
-                raise Exception(
-                    f"[OPEN_PROFILE_FAILED] UID={uid}"
-                ) from e
+                raise Exception(f"[OPEN_PROFILE_FAILED] UID={uid}") from e
 
             # =========================
-            # FIND MESSAGE BUTTON
+            # FIND & SCROLL TO MESSAGE BUTTON
             # =========================
             message_button = find_message_button()
+            human_scroll_to(message_button)
 
-            
             # =========================
             # CLICK MESSAGE BUTTON
             # =========================
             try:
-                self.driver.execute_script(
-                    "arguments[0].scrollIntoView({block: 'center'});",
-                    message_button
-                )
-
-                message_button.click()
-
+                human_click(message_button)
                 print("[+] Đã click Message")
-
-            except ElementClickInterceptedException as e:
-                raise Exception(
-                    f"[MESSAGE_BUTTON_CLICK_BLOCKED] UID={uid}"
-                ) from e
+                human_delay(1.0, 2.5) # Chờ khung chat bật lên
 
             except Exception as e:
-                raise Exception(
-                    f"[MESSAGE_BUTTON_CLICK_FAILED] UID={uid}"
-                ) from e
+                raise Exception(f"[MESSAGE_BUTTON_CLICK_FAILED] UID={uid}") from e
 
             # =========================
             # FIND CHATBOX
@@ -297,21 +363,19 @@ class FacebookBot:
             chatbox = find_chatbox()
 
             # =========================
-            # INPUT MESSAGE
+            # INPUT MESSAGE (Đã có logic của bạn)
             # =========================
             try:
                 print(f"[+] Đang nhập tin nhắn: '{content}'")
-
-                time.sleep(random.uniform(0.2, 0.5))
-                chatbox.send_keys(content)
-
+                human_click(chatbox) # Click kích hoạt khung chat trước khi gõ
+                human_delay(0.3, 0.7)
+                
+                self.type_content_to_editor(chatbox, content)
                 print("[+] Đã nhập tin nhắn")
+                human_delay(0.5, 1.2) # Do dự một chút trước khi bấm gửi
 
             except Exception as e:
-                raise Exception(
-                    f"[INPUT_MESSAGE_FAILED] UID={uid}"
-                ) from e
-
+                raise Exception(f"[INPUT_MESSAGE_FAILED] UID={uid}") from e
 
             # =========================
             # SEND MESSAGE
@@ -319,22 +383,17 @@ class FacebookBot:
             try:
                 print("[+] Đang gửi tin nhắn...")
 
-                # send_button.click()
-                #chatbox.click(Keys.ENTER)
-                time.sleep(random.uniform(0.5, 1.5))
-
+                # Giả lập nhấn ENTER để gửi tin nhắn một cách tự nhiên
+                #chatbox.send_keys(Keys.ENTER)
+                
+                human_delay(1.5, 3.0) # Đợi tin nhắn chuyển trạng thái "Đã gửi"
                 print("[🔑] Gửi thành công!")
 
             except Exception as e:
-                raise Exception(
-                    f"[SEND_MESSAGE_FAILED] UID={uid}"
-                ) from e
-
+                raise Exception(f"[SEND_MESSAGE_FAILED] UID={uid}") from e
 
             clear_chatbox()
-
             close_chat()
-
             return True
 
         except Exception as e:
@@ -606,17 +665,50 @@ def create_excel_file(data, headers, dir, filename):
     print(f"Excel file '{full_path}' created successfully.")
 
 
-uids = [
-    'giang.tien.trung',
-    '100005598214623',
-    '100085462167190',
-    '100005461662862',
-    '100090647756824',
-    '100073770454108',
-    '100005180834862',
-    '100091656182252',
-    '100068953794888'
-]
+def run_messaging_task(data: dict):
+    uid = data.get("uid")
+    username = data.get("username")
+    uid_list = data.get("uid_list", [])
+    content = data.get("content", "")
+
+    # 1. Định nghĩa kênh giao tiếp dựa trên Job ID của RQ
+    current_job = get_current_job()
+    job_id = current_job.id if current_job else f"fallback_{uid}"
+    channel_name = f"job_channel:{job_id}"
+
+    bot = FacebookBot()
+    bot.user_agent = data.get("user_agent", "")
+
+    try:
+        # Báo cho FastAPI SSE biết: Worker đã bốc task và bắt đầu xử lý
+        redis_client.publish(channel_name, json.dumps({"status": "processing"}))
+
+        # 2. Đăng nhập
+        if not bot.login_with_cookies(uid, data.get("cookie_json", [])):
+            print("Failed login!")
+            # Phát tín hiệu thất bại do lỗi Auth về SSE
+            redis_client.publish(channel_name, json.dumps({"status": "failed", "reason": "auth_failed"}))
+            return {"status": "failed", "reason": "auth_failed", "uid": uid}
+
+        # 3. Điều phối tác vụ (Rẽ nhánh gọi hàm riêng biệt)
+        success_count = 0
+        for user_id in uid_list:
+            result = bot.send_message_via_uid(user_id, content)
+            if result:
+                success_count += 1
+
+        # Phát tín hiệu THÀNH CÔNG MỸ MÃN về cho FastAPI SSE
+        redis_client.publish(channel_name, json.dumps({"status": "completed", "successCount": success_count}))
+        return {"status": "completed", "uid": uid, "successCount": success_count}
+
+    except Exception as e:
+        print(f"[Task {uid}] Lỗi hệ thống: {str(e)}")
+        # Phát tín hiệu THẤT BẠI do crash hệ thống về cho FastAPI SSE kèm theo chi tiết lỗi
+        redis_client.publish(channel_name, json.dumps({"status": "failed", "error": str(e)}))
+        return {"status": "error", "message": str(e), "uid": uid}
+
+    finally:
+        bot.close()
 
 def run_selenium_scan_group(data: dict):
     uid = data.get("uid")
