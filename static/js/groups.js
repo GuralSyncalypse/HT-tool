@@ -307,37 +307,139 @@ function updateMasterCheckboxState() {
     masterCheckbox.checked = isAllCurrentPageSelected;
 }
 
-// Chạy khởi tạo danh sách rỗng ban đầu (Hiện chữ Mặc định: ALL)
+export async function exportToExcel() {
+    let dataToExport = [];
+
+    // TRƯỜNG HỢP 1: Người dùng có chọn nhóm chủ động
+    if (selectedGroups.length > 0) {
+        dataToExport = selectedGroups;
+    } 
+    // TRƯỜNG HỢP 2: Không chọn gì => Mặc định: Chọn tất cả (ALL)
+    else {
+        // Kiểm tra xem đã có UID chưa, nếu chưa có dữ liệu gì thì không xuất
+        if (!currentUid) {
+            alert("Không có dữ liệu nhóm nào để xuất!");
+            return;
+        }
+
+        const confirmExportAll = confirm("Bạn chưa chọn nhóm nào. Hệ thống sẽ xuất TẤT CẢ các nhóm của tài khoản này. Bạn có muốn tiếp tục?");
+        if (!confirmExportAll) return;
+
+        try {
+            // Hiện trạng thái loading nhẹ nếu cần (Optional)
+            console.log("⏳ Đang tải toàn bộ danh sách nhóm từ Server...");
+
+            // KHÔNG truyền page và page_size để API trả về ALL theo logic Backend của bạn
+            const params = new URLSearchParams({
+                uid: currentUid,
+                username: currentUsername
+            });
+
+            const response = await fetchWithAuth(`/api/v1/get-groups?${params.toString()}`);
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+            const result = await response.json();
+            // Lấy mảng dữ liệu trả về (tùy cấu trúc JSON backend của bạn)
+            const allGroupsFromServer = result.data || result; 
+
+            if (!allGroupsFromServer || allGroupsFromServer.length === 0) {
+                alert("Tài khoản này không có nhóm nào dữ liệu để xuất!");
+                return;
+            }
+
+            dataToExport = allGroupsFromServer;
+
+        } catch (error) {
+            console.error("Lỗi khi tải toàn bộ nhóm để xuất Excel:", error);
+            alert("Có lỗi xảy ra khi lấy dữ liệu tổng từ máy chủ!");
+            return;
+        }
+    }
+
+    // --- TIẾN HÀNH DỰNG FILE EXCEL TỪ MẢNG DATA_TO_EXPORT ---
+    const formattedData = dataToExport.map((group, index) => ({
+        "STT": index + 1,
+        "Mã Nhóm (Group ID)": group.group_id,
+        "Tên Nhóm": group.group_name || '',
+        "Đường dẫn (URL)": group.group_url || ''
+    }));
+
+    // Khởi tạo và tải file bằng SheetJS
+    const worksheet = XLSX.utils.json_to_sheet(formattedData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Danh sách nhóm");
+    
+    worksheet["!cols"] = [{ wch: 6 }, { wch: 20 }, { wch: 40 }, { wch: 50 }];
+
+    const prefixName = selectedGroups.length > 0 ? "Selected" : "ALL";
+    const fileName = `Danh_sach_nhom_${prefixName}_${new Date().toISOString().slice(0, 10)}.xlsx`;
+    XLSX.writeFile(workbook, fileName);
+}
+
+// Tìm đoạn mã: document.addEventListener("DOMContentLoaded", () => { ... }) 
+// Cập nhật lại để lắng nghe sự kiện nút bấm "Xuất nhóm"
+// Tìm đến hàm lắng nghe DOMContentLoaded hiện tại của bạn và cập nhật:
 document.addEventListener("DOMContentLoaded", () => {
     renderSelectedList();
+
+    // LẮNG NGHE SỰ KIỆN NÚT XUẤT EXCEL TẠI ĐÂY
+    const exportBtn = document.getElementById("btn-export-group");
+    if (exportBtn) {
+        exportBtn.addEventListener("click", exportToExcel);
+    }
 
     const masterCheckbox = document.getElementById("master-checkbox");
     if (masterCheckbox) {
         masterCheckbox.addEventListener("change", (e) => {
             const isChecked = e.target.checked;
-
             if (isChecked) {
-                // HÀNH ĐỘNG: CHỌN HẾT TRANG HIỆN TẠI
                 displayGroups.forEach(group => {
-                    // Nếu group này chưa có trong danh sách tổng thì mới push vào
                     if (!selectedGroups.some(g => g.group_id === group.group_id)) {
                         selectedGroups.push(group);
                     }
                 });
             } else {
-                // HÀNH ĐỘNG: BỎ CHỌN HẾT TRANG HIỆN TẠI
-                // Chỉ lọc bỏ các group có group_id nằm trong trang hiện tại
                 selectedGroups = selectedGroups.filter(g => 
                     !displayGroups.some(dg => dg.group_id === g.group_id)
                 );
             }
-
-            // Cập nhật lại giao diện
-            renderSelectedList(); // Vẽ lại danh sách badge phía trên + cập nhật counter
-            renderPage();         // Tích hoặc hủy tích các checkbox hàng dưới
+            renderSelectedList();
+            renderPage();
         });
     }
 });
+
+// Chạy khởi tạo danh sách rỗng ban đầu (Hiện chữ Mặc định: ALL)
+// document.addEventListener("DOMContentLoaded", () => {
+//     renderSelectedList();
+
+//     const masterCheckbox = document.getElementById("master-checkbox");
+//     if (masterCheckbox) {
+//         masterCheckbox.addEventListener("change", (e) => {
+//             const isChecked = e.target.checked;
+
+//             if (isChecked) {
+//                 // HÀNH ĐỘNG: CHỌN HẾT TRANG HIỆN TẠI
+//                 displayGroups.forEach(group => {
+//                     // Nếu group này chưa có trong danh sách tổng thì mới push vào
+//                     if (!selectedGroups.some(g => g.group_id === group.group_id)) {
+//                         selectedGroups.push(group);
+//                     }
+//                 });
+//             } else {
+//                 // HÀNH ĐỘNG: BỎ CHỌN HẾT TRANG HIỆN TẠI
+//                 // Chỉ lọc bỏ các group có group_id nằm trong trang hiện tại
+//                 selectedGroups = selectedGroups.filter(g => 
+//                     !displayGroups.some(dg => dg.group_id === g.group_id)
+//                 );
+//             }
+
+//             // Cập nhật lại giao diện
+//             renderSelectedList(); // Vẽ lại danh sách badge phía trên + cập nhật counter
+//             renderPage();         // Tích hoặc hủy tích các checkbox hàng dưới
+//         });
+//     }
+// });
 
 export function renderEmptyState() {
     const groupContainer = document.getElementById("group-container");
